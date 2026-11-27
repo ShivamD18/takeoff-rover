@@ -139,7 +139,9 @@ void loop() {
 
   // Claw: RB latches open/grip, then RT overrides proportionally while it is held.
   if (eRB.rose(pad->r1())) claw_.toggle();
-  claw_.trim(constrain(pad->throttle() / 1023.0f, 0.0f, 1.0f), dt);
+  // Bluepad32 reports the analog triggers 0..1023. constrain() is a macro that would
+  // call throttle() up to three times, so clamp with fminf/fmaxf instead.
+  claw_.trim(fminf(1.0f, fmaxf(0.0f, pad->throttle() / 1023.0f)), dt);
   uint8_t dp = pad->dpad();
   if (eLeft.rose(dp & DPAD_LEFT))   { claw_.setBlock(claw::Block::LEGO);  pad->playDualRumble(0, 120, 0x60, 0x00); }
   if (eRight.rose(dp & DPAD_RIGHT)) { claw_.setBlock(claw::Block::DUPLO); pad->playDualRumble(0, 400, 0x60, 0x00); }
