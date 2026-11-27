@@ -83,8 +83,8 @@ int main() {
 
   // Claw pulses.
   std::printf("Claw: open %u us, LEGO grip %u us, Duplo grip %u us\n", claw::usForGap(claw::OPEN_GAP),
-              claw::usForGap(claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE)),
-              claw::usForGap(claw::gapForGrip(claw::Block::DUPLO, claw::SQUEEZE)));
+              claw::usForGap(claw::gapForGrip(claw::Block::LEGO)),
+              claw::usForGap(claw::gapForGrip(claw::Block::DUPLO)));
 
   // ---------- Jaw motion profile ----------
   // Runs the firmware's own claw::step at the 50 Hz control rate and measures what the
@@ -92,9 +92,9 @@ int main() {
   // acceleration between ticks) and any overshoot past the target.
   std::printf("Jaw moves at %.0f Hz (limit %.0f mm/s, accel %.0f mm/s^2):\n", 1.0f / DT, CLAW_MM_S, CLAW_ACCEL_MM_S2);
   struct Move { const char *name; float from, to; } moves[] = {
-    {"open -> LEGO grip",  claw::OPEN_GAP, claw::gapForGrip(claw::Block::LEGO,  claw::SQUEEZE)},
-    {"open -> Duplo grip", claw::OPEN_GAP, claw::gapForGrip(claw::Block::DUPLO, claw::SQUEEZE)},
-    {"LEGO grip -> open",  claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE), claw::OPEN_GAP},
+    {"open -> LEGO grip",  claw::OPEN_GAP, claw::gapForGrip(claw::Block::LEGO)},
+    {"open -> Duplo grip", claw::OPEN_GAP, claw::gapForGrip(claw::Block::DUPLO)},
+    {"LEGO grip -> open",  claw::gapForGrip(claw::Block::LEGO), claw::OPEN_GAP},
     {"1 mm nudge",         claw::OPEN_GAP, claw::OPEN_GAP - 1.0f},
   };
   for (const Move &mv : moves) {
@@ -128,7 +128,7 @@ int main() {
   // arrival, so its acceleration was the whole speed over one tick either way.
   {
     const float OLD_MM_S = 40.0f;                  // the rate before the profile
-    float dist = claw::OPEN_GAP - claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE);
+    float dist = claw::OPEN_GAP - claw::gapForGrip(claw::Block::LEGO);
     float oldAccel = OLD_MM_S / DT, oldJerk = oldAccel / DT;
     std::printf("  was (constant %.0f mm/s)  %.2f s  accel %.0f mm/s^2  jerk %.0f mm/s^3 at both ends\n",
                 OLD_MM_S, dist / OLD_MM_S, oldAccel, oldJerk);
@@ -139,7 +139,7 @@ int main() {
   // gap stays inside the acceleration limit and tracks the average, not the noise.
   {
     motion::State m; m.pos = claw::OPEN_GAP; m.vel = 0.0f;
-    float closed = claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE);
+    float closed = claw::gapForGrip(claw::Block::LEGO);
     float aMax = 0, vPrev = 0;
     unsigned seed = 12345;
     for (int i = 0; i < 300; i++) {
@@ -163,20 +163,26 @@ int main() {
   // Relief creep after a long hold must be gentle and must not open the jaws far.
   {
     motion::State m;
-    m.pos = claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE);
+    m.pos = claw::gapForGrip(claw::Block::LEGO);
     m.vel = 0.0f;
-    float relieved = claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE_RELIEVED);
+    float relieved = claw::gapForRelief(claw::Block::LEGO);
     int ticks = 0;
     while (!motion::step(m, relieved, DT, CLAW_RELIEF_MM_S, CLAW_ACCEL_MM_S2) && ticks < 2000) ticks++;
     std::printf("  squeeze relief     %.1f -> %.1f mm in %.2f s at <= %.1f mm/s\n",
-                claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE), relieved, ticks * DT, CLAW_RELIEF_MM_S);
+                claw::gapForGrip(claw::Block::LEGO), relieved, ticks * DT, CLAW_RELIEF_MM_S);
     CHECK(ticks > 2, "relief creep lands in %d ticks: too abrupt to be a creep", ticks);
     // Relief exists to unload the servo, not to let go: it may only ever open the jaws,
     // and the eased grip must still be squeezing the block.
-    CHECK(claw::SQUEEZE_RELIEVED > 0.0f && claw::SQUEEZE_RELIEVED < claw::SQUEEZE,
-          "relief squeeze %.1f mm must be between 0 and the full %.1f mm",
-          claw::SQUEEZE_RELIEVED, claw::SQUEEZE);
-    CHECK(relieved < claw::LEGO_W, "relieved gap %.1f mm is wider than a LEGO brick: the block drops", relieved);
+    // Relief exists to unload the servo, not to let go.
+    CHECK(relieved > claw::gapForGrip(claw::Block::LEGO), "relief tightens the grip instead of easing it");
+    CHECK(claw::usForGap(relieved) < claw::usForGap(claw::gapForGrip(claw::Block::LEGO)),
+          "relief pulse %u is not backed off the grip pulse %u",
+          claw::usForGap(relieved), claw::usForGap(claw::gapForGrip(claw::Block::LEGO)));
+    // The grip pulses are what actually hold the blocks, so they must be reachable.
+    CHECK(claw::LEGO_GRIP_US <= claw::MAX_US && claw::DUPLO_GRIP_US <= claw::MAX_US,
+          "a grip pulse is past MAX_US and would be clamped");
+    std::printf("  grip pulses       LEGO %.0f us, Duplo %.0f us, relief backs off %.0f us\n",
+                claw::LEGO_GRIP_US, claw::DUPLO_GRIP_US, claw::RELIEF_US);
   }
 
   // ---------- Arm preset moves ----------

@@ -127,7 +127,7 @@ public:
   }
 
   void open()   { target_ = claw::OPEN_GAP; gripping_ = false; slow_ = false; }
-  void grip()   { target_ = claw::gapForGrip(block_, claw::SQUEEZE); gripping_ = true; slow_ = false; gripSince_ = millis(); }
+  void grip()   { target_ = claw::gapForGrip(block_); gripping_ = true; slow_ = false; gripSince_ = millis(); }
   void toggle() { gripping_ ? open() : grip(); }
   void setBlock(claw::Block b) { block_ = b; if (gripping_ && !trigger_) grip(); }
   claw::Block block() const { return block_; }
@@ -146,7 +146,7 @@ public:
       trigFilt_ += dt / (CLAW_TRIGGER_TAU + dt) * (trig - trigFilt_);
       float f = (fminf(trigFilt_, 1.0f) - CLAW_TRIGGER_DB) / (1.0f - CLAW_TRIGGER_DB);
       f = fmaxf(0.0f, f);
-      float closed = claw::gapForGrip(block_, claw::SQUEEZE);
+      float closed = claw::gapForGrip(block_);
       target_ = claw::OPEN_GAP + f * (closed - claw::OPEN_GAP);
       trigger_ = true;
       slow_ = false;
@@ -166,7 +166,7 @@ public:
     // Long hold: back off the squeeze so the SG90 is not stalled hard indefinitely.
     // Crept in at CLAW_RELIEF_MM_S, because a step here would twitch the block.
     if (gripping_ && !trigger_ && !slow_ && millis() - gripSince_ > CLAW_RELIEF_MS) {
-      float relieved = claw::gapForGrip(block_, claw::SQUEEZE_RELIEVED);
+      float relieved = claw::gapForRelief(block_);
       if (relieved > target_) { target_ = relieved; slow_ = true; }
     }
 

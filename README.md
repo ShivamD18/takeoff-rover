@@ -100,11 +100,19 @@ stopped dead on arrival, which is the snatch. Tunables are in `config.h`:
 | `CLAW_TRIGGER_DB` | 0.06 | RT travel ignored before the trigger takes over |
 | `CLAW_TRIGGER_TAU` | 0.05 s | RT smoothing, so thumb shake and ADC noise don't reach the fingers |
 | `CLAW_RELIEF_MM_S` | 2.5 mm/s | Creep rate when easing a long squeeze |
-| `claw::SQUEEZE` | 3.0 mm | How far past contact the jaws close. **This is the grip-strength dial** |
+| `claw::LEGO_GRIP_US` | 2087 µs | **Grip-strength dial.** The pulse that holds a LEGO brick |
+| `claw::DUPLO_GRIP_US` | 1544 µs | The pulse that holds a Duplo brick |
+| `claw::RELIEF_US` | 40 µs | How far the squeeze eases off after a long hold |
 | `claw::MIN_US` | 700 µs | The fully-open end. This alone caps how wide the jaws go |
 
-`OPEN_GAP` is now derived from `MIN_US` rather than being a fixed millimetre figure, so "open" always means
-the open pulse limit and capping the opening is a one-line change that survives recalibration.
+`OPEN_GAP` is derived from `MIN_US` rather than being a fixed millimetre figure, so "open" always means the
+open pulse limit and capping the opening is a one-line change that survives recalibration.
+
+**Grip strength is set as a pulse, not a squeeze in millimetres.** The mm scale depends on `US_PER_DEG` and
+`REF_GAP`, which are still uncalibrated, so a figure in mm does not mean what it says — a pulse does.
+Converting a pulse into the internal mm coordinate and back is exact, so the jaws land on precisely the pulse
+set here whatever the calibration turns out to be. To retune: close the claw on the block in the live page
+until it holds firmly, and put that pulse in `LEGO_GRIP_US` / `DUPLO_GRIP_US`. **Longer pulse = harder grip.**
 
 **RT squeezes the claw proportionally** and overrides the RB latch while held; let go and the jaws hold the gap they
 reached, so a block stays gripped without keeping a finger on the trigger. RB still toggles full open / full grip for

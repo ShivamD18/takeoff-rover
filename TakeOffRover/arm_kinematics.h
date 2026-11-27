@@ -205,10 +205,22 @@ constexpr float DUPLO_W  = 31.7f;
 // open is therefore a change to MIN_US alone, and it stays correct through recalibration
 // instead of drifting away from whatever OPEN_GAP was once measured to be.
 constexpr float OPEN_GAP = gapForUs(MIN_US);
-constexpr float SQUEEZE  = 3.0f;    // CAL: mm past contact, taken up by the rubber pads
-constexpr float SQUEEZE_RELIEVED = 1.8f;
+// ---------- Grip strength ----------
+// Set as the PULSE that holds each block firmly, measured on the rover, not as a squeeze
+// in millimetres. The mm scale depends on US_PER_DEG and REF_GAP, which are still
+// uncalibrated, so a figure in mm does not mean what it says; a pulse does. Converting a
+// pulse into the internal mm coordinate and back is exact, so the jaws land on precisely
+// the pulse set here whatever the calibration turns out to be.
+// To retune: close the claw on the block in the live page until it holds firmly, and put
+// that pulse here. Bigger pulse = harder grip (a longer pulse closes).
+constexpr float LEGO_GRIP_US  = 2087.0f;  // CAL: pulse that holds a LEGO brick
+constexpr float DUPLO_GRIP_US = 1544.0f;  // CAL: pulse that holds a Duplo brick
+constexpr float RELIEF_US     = 40.0f;    // ease this far off the grip pulse after a long hold
 
-inline float gapForGrip(Block b, float squeeze) { return (b == Block::LEGO ? LEGO_W : DUPLO_W) - squeeze; }
+constexpr float gripUs(Block b) { return b == Block::LEGO ? LEGO_GRIP_US : DUPLO_GRIP_US; }
+inline float gapForGrip(Block b) { return gapForUs(gripUs(b)); }
+// Relief backs the pulse off toward the open end, so it always loosens, never tightens.
+inline float gapForRelief(Block b) { return gapForUs(gripUs(b) + OPEN_SIGN * RELIEF_US); }
 
 // Rounded, not truncated: a half-microsecond bias here is a 0.015 mm step in the gap,
 // but truncation also makes the pulse change one tick early on the way down and late on
