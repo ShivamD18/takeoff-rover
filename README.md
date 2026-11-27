@@ -68,8 +68,15 @@ and that all 12 moves between presets stay clear of the deck and bracket.
 
 The jaws run a speed- and acceleration-limited profile (`claw::step` in `arm_kinematics.h`, pure math so
 `tools/arm_check` tests the same code the firmware runs), instead of stepping to full speed in one 20 ms tick
-and stopping dead on arrival. Open to a LEGO grip takes **0.68 s** — quicker than the old constant-speed ramp
-and with no snatch at either end. Tunables are in `config.h`:
+and stopping dead on arrival. `tools/arm_check` prints the before and after:
+
+| | Open → LEGO grip | Acceleration | Jerk |
+|---|---|---|---|
+| Constant-speed ramp (before) | 0.77 s | 2000 mm/s² | 100000 mm/s³ at both ends |
+| Profile (now) | **0.68 s** | 420 mm/s² | 392 mm/s³ |
+
+So the grip is both quicker and far smoother: the old ramp went from rest to the full rate in one 20 ms tick and
+stopped dead on arrival, which is the snatch. Tunables are in `config.h`:
 
 | Value | Default | What it does |
 |---|---|---|

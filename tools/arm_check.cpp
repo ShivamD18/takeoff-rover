@@ -123,6 +123,18 @@ int main() {
     CHECK(jerkMax <= CLAW_ACCEL_MM_S2 / DT + 1.0f, "%s jerk %.0f exceeds one accel step", mv.name, jerkMax);
   }
 
+  // Baseline: the constant-speed ramp this replaced, so the gain is on the record.
+  // It stepped the jaws from rest to the full rate in one tick and stopped them dead on
+  // arrival, so its acceleration was the whole speed over one tick either way.
+  {
+    const float OLD_MM_S = 40.0f;                  // the rate before the profile
+    float dist = claw::OPEN_GAP - claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE);
+    float oldAccel = OLD_MM_S / DT, oldJerk = oldAccel / DT;
+    std::printf("  was (constant %.0f mm/s)  %.2f s  accel %.0f mm/s^2  jerk %.0f mm/s^3 at both ends\n",
+                OLD_MM_S, dist / OLD_MM_S, oldAccel, oldJerk);
+    CHECK(CLAW_ACCEL_MM_S2 < oldAccel, "the profile does not reduce acceleration vs the old ramp");
+  }
+
   // A shaky trigger thumb must not shake the fingers: feed a noisy command and check the
   // gap stays inside the acceleration limit and tracks the average, not the noise.
   {
