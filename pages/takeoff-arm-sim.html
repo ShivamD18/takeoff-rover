@@ -1,0 +1,516 @@
+<title>TakeOFF Arm Simulator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: CAD-viewport workbench. Big side-view drawing left, instrument panel right; stacks on phones. */
+:root {
+  --bg: #eef1f3;
+  --panel: #f8fafb;
+  --ink: #1b2329;
+  --muted: #5d6b75;
+  --line: #c9d1d7;
+  --grid: #dde3e7;
+  --accent: #1f5fbf;     /* linkage / active */
+  --accent-soft: #d6e3f6;
+  --link2: #6f7f8b;      /* passive links */
+  --ok: #1d7a4c;
+  --warn: #b26a00;
+  --bad: #b3261e;
+  --block: #d23c2a;
+  --ground: #a7b2ba;
+  --safe: rgba(31, 95, 191, 0.13);
+  --font-ui: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12171b; --panel: #192026; --ink: #e3e9ed; --muted: #93a2ad; --line: #2c3740; --grid: #212a31;
+    --accent: #6ea2f0; --accent-soft: #1f3150; --link2: #8796a1; --ok: #4cc28a; --warn: #e3a240; --bad: #f07067;
+    --block: #ef6a55; --ground: #4a5660; --safe: rgba(110, 162, 240, 0.16); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12171b; --panel: #192026; --ink: #e3e9ed; --muted: #93a2ad; --line: #2c3740; --grid: #212a31;
+  --accent: #6ea2f0; --accent-soft: #1f3150; --link2: #8796a1; --ok: #4cc28a; --warn: #e3a240; --bad: #f07067;
+  --block: #ef6a55; --ground: #4a5660; --safe: rgba(110, 162, 240, 0.16); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 15px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1240px; margin: 0 auto; display: grid; gap: 16px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; }
+h1 { font-size: 26px; font-weight: 700; letter-spacing: 0.01em; margin: 0; text-wrap: balance; }
+.sub { color: var(--muted); font-size: 14px; margin: 2px 0 0; max-width: 70ch; }
+.tag { font-family: var(--font-data); font-size: 12px; color: var(--muted); }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.view { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px; min-width: 0; }
+.viewbar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.hint { color: var(--muted); font-size: 13px; }
+#scene { width: 100%; aspect-ratio: 400 / 300; display: block; touch-action: none; cursor: crosshair; border-radius: 4px; max-width: 100%; }
+#scene:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.panel { display: grid; gap: 12px; min-width: 0; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; display: grid; gap: 10px; align-content: start; }
+.card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); margin: 0; font-weight: 600; }
+.status { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); flex: none; }
+.status.bad .dot { background: var(--bad); } .status.warn .dot { background: var(--warn); }
+.status small { display: block; font-weight: 400; color: var(--muted); font-size: 13px; }
+.btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.btns.two { grid-template-columns: repeat(2, 1fr); }
+button {
+  font-family: var(--font-ui); font-size: 14px; font-weight: 600; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 5px; padding: 8px 6px; cursor: pointer; display: grid; gap: 1px; justify-items: center;
+}
+button .k { font-family: var(--font-data); font-size: 11px; font-weight: 500; color: var(--muted); }
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+.slider { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; }
+.slider label { font-size: 14px; }
+.slider output { font-family: var(--font-data); font-size: 13px; font-variant-numeric: tabular-nums; }
+.slider input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+dl { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin: 0; font-size: 14px; }
+dt { color: var(--muted); }
+dd { margin: 0; font-family: var(--font-data); font-variant-numeric: tabular-nums; text-align: right; font-size: 13px; }
+.lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 900px) { .lower { grid-template-columns: minmax(0, 1fr); } }
+#jspace { width: 100%; aspect-ratio: 360 / 250; display: block; max-width: 100%; }
+.torque { display: grid; gap: 10px; }
+.bar { display: grid; grid-template-columns: 74px 1fr 92px; gap: 10px; align-items: center; font-size: 14px; }
+.track { height: 12px; background: var(--grid); border-radius: 3px; position: relative; overflow: hidden; }
+.fill { position: absolute; inset: 0 auto 0 0; background: var(--ok); border-radius: 3px; }
+.bar .v { font-family: var(--font-data); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.masses { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.masses label { display: grid; gap: 2px; font-size: 13px; color: var(--muted); }
+.masses input { font-family: var(--font-data); font-size: 14px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--ink); width: 100%; }
+.notes { font-size: 13.5px; color: var(--muted); max-width: 90ch; }
+.notes ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 3px; }
+.notes b { color: var(--ink); font-weight: 600; }
+code { font-family: var(--font-data); font-size: 12.5px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>TakeOFF Arm Simulator</h1>
+      <p class="sub">Side view of the Big 6ixers parallel-link arm, drawn to scale from the Fusion STEP export. It uses the same kinematics, limits, presets and servo mapping as the rover firmware.</p>
+    </div>
+    <span class="tag">upper arm 120 · forearm 100 · shoulder 152.4 above floor · units mm</span>
+  </header>
+
+  <div class="main">
+    <section class="view" aria-label="Arm side view">
+      <div class="viewbar">
+        <span class="hint">Drag in the drawing to move the claw tip. Arrow keys nudge 2 mm once the drawing is focused.</span>
+        <span class="tag" id="tipxz">tip x 0 · z 0</span>
+      </div>
+      <canvas id="scene" tabindex="0" aria-label="Arm drawing. Drag or use arrow keys to move the claw tip."></canvas>
+    </section>
+
+    <aside class="panel">
+      <div class="card">
+        <div class="status" id="status"><span class="dot"></span><div><span id="statusText">Inside the safe region</span><small id="statusSub">All limits clear</small></div></div>
+      </div>
+
+      <div class="card">
+        <h2>Presets (controller buttons)</h2>
+        <div class="btns">
+          <button id="pPick"><span>Pick</span><span class="k">A</span></button>
+          <button id="pCarry"><span>Carry</span><span class="k">B</span></button>
+          <button id="pDrop"><span>Drop</span><span class="k">Y</span></button>
+          <button id="pStow"><span>Stow</span><span class="k">X</span></button>
+        </div>
+        <div class="btns two">
+          <button id="clawBtn" aria-pressed="false"><span id="clawLabel">Grip</span><span class="k">RB</span></button>
+          <button id="blockBtn"><span id="blockLabel">Block: LEGO</span><span class="k">D-pad ← / →</span></button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Servo pulses</h2>
+        <div class="slider"><label for="sSh">Shoulder MG996R · GPIO19</label><output id="oSh">1500 µs</output><input id="sSh" type="range" min="850" max="2150" step="5" value="1500"></div>
+        <div class="slider"><label for="sEl">Elbow MG996R · GPIO18</label><output id="oEl">1500 µs</output><input id="sEl" type="range" min="850" max="2150" step="5" value="1500"></div>
+        <div class="slider"><label for="sCl">Claw SG90 · GPIO21</label><output id="oCl">1500 µs</output><input id="sCl" type="range" min="700" max="2300" step="5" value="1500"></div>
+      </div>
+
+      <div class="card">
+        <h2>Readout</h2>
+        <dl>
+          <dt>Upper arm angle θ1</dt><dd id="rT1">–</dd>
+          <dt>Forearm angle θ2</dt><dd id="rT2">–</dd>
+          <dt>Fold angle θ1 − θ2</dt><dd id="rRel">–</dd>
+          <dt>Claw tip (x, z)</dt><dd id="rTip">–</dd>
+          <dt>Jaw gap</dt><dd id="rGap">–</dd>
+        </dl>
+      </div>
+    </aside>
+  </div>
+
+  <div class="lower">
+    <section class="card" aria-label="Joint space">
+      <h2>Joint space: where the arm is allowed to go</h2>
+      <canvas id="jspace" aria-label="Plot of upper arm angle against forearm angle with the safe region shaded"></canvas>
+      <p class="hint" style="margin:0">Blue is every angle pair inside the joint limits; red cells inside it are poses where the claw or forearm would hit the deck, bracket or floor. The firmware rejects both, and every straight move between presets avoids the red cells.</p>
+    </section>
+
+    <section class="card" aria-label="Servo torque">
+      <h2>Holding torque vs MG996R stall (9.4 kgf·cm at 4.8 V)</h2>
+      <div class="torque">
+        <div class="bar"><span>Shoulder</span><div class="track"><div class="fill" id="fSh"></div></div><span class="v" id="vSh">–</span></div>
+        <div class="bar"><span>Elbow</span><div class="track"><div class="fill" id="fEl"></div></div><span class="v" id="vEl">–</span></div>
+      </div>
+      <div class="masses">
+        <label for="mUp">Upper arm links (g)<input id="mUp" type="number" min="0" max="500" step="1" value="25"></label>
+        <label for="mFo">Forearm links (g)<input id="mFo" type="number" min="0" max="500" step="1" value="20"></label>
+        <label for="mCl">Claw + SG90 (g)<input id="mCl" type="number" min="0" max="500" step="1" value="40"></label>
+        <label for="mPl">Payload (g)<input id="mPl" type="number" min="0" max="500" step="1" value="3"></label>
+      </div>
+      <p class="hint" style="margin:0">Masses are estimates until the parts are printed. Weigh them and type the real values. Green is under 30 % of stall, amber is under 60 %, red is above that.</p>
+    </section>
+  </div>
+
+  <section class="notes">
+    <b>What this does and doesn't show</b>
+    <ul>
+      <li><b>From the STEP export:</b> link lengths, the level-keeping and crank parallelograms, the claw body and its offset from the wrist pin (84.3 mm down, 15.7 mm forward), the deck (top 39.5 mm below the shoulder axis, front edge 75 mm ahead), the servo bracket, and the claw gear ratio (24-tooth, module 0.7 pinion: 0.29 mm of gap per servo degree).</li>
+      <li><b>Measured:</b> shoulder axis 152.4 mm (about 6 in) above the floor. The CAD has 160.2 mm.</li>
+      <li><b>Assumed until calibrated (CAL in the firmware):</b> 10 µs per servo degree with opposite signs on the two MG996Rs (they face each other), horns fitted so 1500 µs gives θ1 = 45° and θ2 = −30°, claw gap 30 mm at 1500 µs, and the 20°/160° fold limits from the CAD notes.</li>
+      <li><b>Not modelled:</b> servo speed under load, play in printed joints, grip friction and power supply sag. Those still need bench tests. The wheels sit beside the arm, so they are drawn faint and not checked. The jaws open sideways, so the side view shows the near finger and the inset shows the gap.</li>
+    </ul>
+  </section>
+</div>
+
+<script>
+(() => {
+  // ---------- Geometry (mm, deg) — matches TakeOffRover/arm_kinematics.h ----------
+  // From the Fusion STEP export, except H (measured on the rover). x = forward of the
+  // shoulder axis, z = height above the floor. Claw tip = claw centre at the finger bottoms.
+  const A2 = 120, A3 = 100, H = 152.4, TIP_DOWN = 84.3, TIP_FWD = 15.7, CRANK = 30, HREF = 25, V1 = 135, V2 = 60;
+  const CLAW_BACK = 6.0, CLAW_FRONT = 35.7, RAIL_DOWN = 47.8, RAIL_UP = 24.7;  // claw body around wrist pin W
+  const BRACKET_X = 28.6, BRACKET_TOP = H + 25.8, DECK_X = 75, DECK_TOP = H - 39.5, CLEARANCE = 8, FOREARM_R = 6;
+  const T1_MIN = -10, T1_MAX = 100, T2_MIN = -85, T2_MAX = 25, REL_MIN = 20, REL_MAX = 160;
+  // The MG996Rs face each other on the shoulder axis, so their pulse directions are opposite.
+  const T1_C = 45, T2_C = -30, SH_US_PER_DEG = 10, EL_US_PER_DEG = -10, US_PER_DEG = 10, SV_MIN = 850, SV_MAX = 2150;
+  const PITCH_R = 8.4, GAP_PER_DEG = 2 * PITCH_R * Math.PI / 180, CL_REF_US = 1500, CL_REF_GAP = 30, CL_MIN = 700, CL_MAX = 2300;
+  const CL_OPEN_SIGN = -1;   // a shorter pulse opens the claw (checked on the rover)
+  const OPEN_GAP = 45, SQUEEZE = 1.5;
+  const BLOCKS = { LEGO: { w: 15.8, h: 11.4, name: "LEGO" }, DUPLO: { w: 31.7, h: 19.2, name: "Duplo" } };
+  const PRESETS = { pick: [170, 5], carry: [140, 60], drop: [200, 55], stow: [115, 120] };
+  const PRESET_DEG_S = 90, CLAW_MM_S = 40;
+  const WALL = { x: 140, w: 5, h: 25.4 };   // scene prop: a 1-inch safe-zone wall
+  const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI;
+
+  const S = { t1: 0, t2: 0, gap: OPEN_GAP, gapTarget: OPEN_GAP, gripping: false, block: "LEGO",
+              goal: null, reason: null, blockPos: { x: 170, z: 0 }, held: false, heldDz: 0 };
+
+  function jointReason(t1, t2) {
+    const rel = t1 - t2;
+    if (t1 < T1_MIN || t1 > T1_MAX) return ["Upper arm limit", `θ1 must stay between ${T1_MIN}° and ${T1_MAX}° (level-keeping links jam)`];
+    if (t2 < T2_MIN || t2 > T2_MAX) return ["Forearm limit", `θ2 must stay between ${T2_MIN}° and ${T2_MAX}° (level-keeping links jam)`];
+    if (rel < REL_MIN || rel > REL_MAX) return ["Linkage too flat", `θ1 − θ2 must stay between ${REL_MIN}° and ${REL_MAX}°`];
+    return null;
+  }
+  // Highest solid surface at forward position x: servo bracket, deck, then the floor (0).
+  const obstacleTop = x => x < BRACKET_X ? BRACKET_TOP : x < DECK_X ? DECK_TOP : 0;
+  function collisionReason(t1, t2) {
+    const { E, W } = fk(t1, t2), bottom = W[1] - TIP_DOWN;
+    if (bottom < 0) return ["Fingers below the floor", "The claw tip can't go under the floor"];
+    const top = obstacleTop(W[0] - CLAW_BACK - CLEARANCE);
+    if (top > 0 && bottom < top + CLEARANCE)
+      return [top === BRACKET_TOP ? "Claw would hit the servo bracket" : "Claw would hit the deck", `The claw keeps ${CLEARANCE} mm clear of the deck and bracket`];
+    for (let i = 0; i <= 10; i++) {
+      const f = i / 10, x = E[0] + f * (W[0] - E[0]), z = E[1] + f * (W[1] - E[1]), t = obstacleTop(x - FOREARM_R);
+      if (t > 0 && z < t + FOREARM_R) return ["Forearm would hit the deck", "The forearm has to pass above the deck and bracket"];
+    }
+    return null;
+  }
+  const limitReason = (t1, t2) => jointReason(t1, t2) || collisionReason(t1, t2);
+  function ik(x, z) {
+    const wx = x - TIP_FWD, wz = z + TIP_DOWN - H, d2 = wx * wx + wz * wz, d = Math.sqrt(d2);
+    if (d > A2 + A3 - 2 || d < Math.abs(A2 - A3) + 2) return { ok: false, why: ["Out of reach", "The claw tip can't get there with 120 + 100 mm links"] };
+    const c = Math.max(-1, Math.min(1, (A2 * A2 + d2 - A3 * A3) / (2 * A2 * d)));
+    const r1 = Math.atan2(wz, wx) + Math.acos(c);
+    const r2 = Math.atan2(wz - A2 * Math.sin(r1), wx - A2 * Math.cos(r1));
+    const t1 = deg(r1), t2 = deg(r2), why = limitReason(t1, t2);
+    return { ok: !why, t1, t2, why };
+  }
+  function fk(t1, t2) {
+    const E = [A2 * Math.cos(rad(t1)), H + A2 * Math.sin(rad(t1))];
+    const W = [E[0] + A3 * Math.cos(rad(t2)), E[1] + A3 * Math.sin(rad(t2))];
+    return { E, W, tip: [W[0] + TIP_FWD, W[1] - TIP_DOWN] };
+  }
+  const clampSv = u => Math.max(SV_MIN, Math.min(SV_MAX, u));
+  const shUs = t1 => clampSv(1500 + (t1 - T1_C) * SH_US_PER_DEG);
+  const elUs = t2 => clampSv(1500 + (t2 - T2_C) * EL_US_PER_DEG);
+  const clUs = g => Math.max(CL_MIN, Math.min(CL_MAX, CL_REF_US + CL_OPEN_SIGN * (g - CL_REF_GAP) / GAP_PER_DEG * US_PER_DEG));
+  const gapFromUs = u => CL_REF_GAP + CL_OPEN_SIGN * (u - CL_REF_US) / US_PER_DEG * GAP_PER_DEG;
+
+  // start at STOW, as the firmware does at power-up
+  { const r = ik(...PRESETS.stow); S.t1 = r.t1; S.t2 = r.t2; }
+
+  // ---------- Theme colours ----------
+  let C = {};
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    ["bg","panel","ink","muted","line","grid","accent","accent-soft","link2","ok","warn","bad","block","ground","safe"].forEach(k => C[k] = cs.getPropertyValue("--" + k).trim());
+  }
+  readColors();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { readColors(); });
+  new MutationObserver(readColors).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  // ---------- Scene canvas ----------
+  const scene = document.getElementById("scene"), sx = scene.getContext("2d");
+  const VIEW = { x0: -140, x1: 260, z0: -5, z1: 295 };   // mm
+  let sScale = 1, sW = 0, sH = 0;
+  function sizeCanvas(cv, ctx) {
+    const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return [r.width, r.height];
+  }
+  function layoutScene() { [sW, sH] = sizeCanvas(scene, sx); sScale = Math.min(sW / (VIEW.x1 - VIEW.x0), sH / (VIEW.z1 - VIEW.z0)); }
+  const px = x => (x - VIEW.x0) * sScale, pz = z => sH - (z - VIEW.z0) * sScale;
+  const toMM = (X, Y) => [X / sScale + VIEW.x0, (sH - Y) / sScale + VIEW.z0];
+
+  function line(a, b, color, w) { sx.strokeStyle = color; sx.lineWidth = w; sx.lineCap = "round"; sx.beginPath(); sx.moveTo(px(a[0]), pz(a[1])); sx.lineTo(px(b[0]), pz(b[1])); sx.stroke(); }
+  function pin(p, r, fill, stroke) { sx.beginPath(); sx.arc(px(p[0]), pz(p[1]), r, 0, 2 * Math.PI); sx.fillStyle = fill; sx.fill(); sx.strokeStyle = stroke; sx.lineWidth = 1.5; sx.stroke(); }
+  function poly(pts, fill, stroke) { sx.beginPath(); pts.forEach((p, i) => i ? sx.lineTo(px(p[0]), pz(p[1])) : sx.moveTo(px(p[0]), pz(p[1]))); sx.closePath(); sx.fillStyle = fill; sx.fill(); if (stroke) { sx.strokeStyle = stroke; sx.lineWidth = 1.2; sx.stroke(); } }
+  function rect(x, z, w, h, fill, stroke) { poly([[x, z], [x + w, z], [x + w, z + h], [x, z + h]], fill, stroke); }
+  function text(t, x, z, color, align = "left", size = 11) { sx.fillStyle = color; sx.font = `${size}px "IBM Plex Mono", ui-monospace, monospace`; sx.textAlign = align; sx.fillText(t, px(x), pz(z)); }
+  const add = (p, a, l) => [p[0] + l * Math.cos(rad(a)), p[1] + l * Math.sin(rad(a))];
+
+  function drawScene() {
+    sx.clearRect(0, 0, sW, sH);
+    sx.fillStyle = C.panel; sx.fillRect(0, 0, sW, sH);
+    // grid every 20 mm, labels every 100 mm
+    for (let x = Math.ceil(VIEW.x0 / 20) * 20; x <= VIEW.x1; x += 20) line([x, VIEW.z0], [x, VIEW.z1], x % 100 === 0 ? C.line : C.grid, 1);
+    for (let z = Math.ceil(VIEW.z0 / 20) * 20; z <= VIEW.z1; z += 20) line([VIEW.x0, z], [VIEW.x1, z], z % 100 === 0 ? C.line : C.grid, 1);
+    for (let x = -100; x <= 200; x += 100) text(`${x}`, x + 2, VIEW.z0 + 3, C.muted);
+    for (let z = 100; z <= 200; z += 100) text(`${z}`, VIEW.x0 + 3, z + 2, C.muted);
+
+    // ground, deck, wall
+    rect(VIEW.x0, VIEW.z0, VIEW.x1 - VIEW.x0, -VIEW.z0, C.grid);
+    line([VIEW.x0, 0], [VIEW.x1, 0], C.ground, 2);
+    rect(-121, DECK_TOP - 57.5, 121 + DECK_X, 50, C.grid, C.line);           // chassis
+    rect(-121, DECK_TOP - 7.5, 121 + DECK_X, 7.5, C.grid, C.line);           // deck plate
+    // wheels sit beside the arm, not in its plane: dashed outlines for scale only
+    sx.setLineDash([4, 4]);
+    [85, -115].forEach(wx => { sx.strokeStyle = C.muted; sx.lineWidth = 1; sx.beginPath(); sx.arc(px(wx), pz(33.75), 33.75 * sScale, 0, 2 * Math.PI); sx.stroke(); });
+    sx.setLineDash([]);
+    text("wheels (beside the arm)", -78, 8, C.muted, "left", 10);
+    text(`deck top ${DECK_TOP.toFixed(0)}`, -117, DECK_TOP - 19, C.muted);
+    text(`front edge ${DECK_X} ahead`, DECK_X - 3, DECK_TOP - 19, C.muted, "right", 10);
+    rect(WALL.x, 0, WALL.w, WALL.h, C.ground, C.line);
+    text("1-in wall", WALL.x + WALL.w + 3, WALL.h - 8, C.muted);
+
+    const { E, W, tip } = fk(S.t1, S.t2), Sp = [0, H];
+    // servo bracket (both MG996Rs mount to it, on the shoulder axis)
+    rect(-40, DECK_TOP, 40 + BRACKET_X, BRACKET_TOP - DECK_TOP, C.grid, C.line);
+    text("servo bracket", -36, DECK_TOP + 6, C.muted, "left", 10);
+
+    // level-keeping parallelograms (passive links)
+    const G = add(Sp, V1, HREF), H1 = add(E, V1, HREF), H2 = add(E, V2, HREF), K = add(W, V2, HREF);
+    line(G, H1, C.link2, 3);
+    line(H2, K, C.link2, 3);
+    poly([G, Sp, [Sp[0] - 6, Sp[1] - 14]], C.grid, C.link2);
+    // crank parallelogram S-C-T-E
+    const Cp = add(Sp, S.t2 + 180, CRANK), T = add(E, S.t2 + 180, CRANK);
+    line(Sp, Cp, C.accent, 5);
+    line(Cp, T, C.link2, 3);
+    // main links
+    line(Sp, E, C.accent, 7);
+    line(T, W, C.accent, 6);
+    poly([H1, E, H2], C["accent-soft"], C.link2);
+    // claw (STEP): rail base + wrist plate, SG90, and the near finger (the far one is behind it)
+    rect(W[0] - CLAW_BACK, W[1] - RAIL_DOWN, CLAW_BACK + CLAW_FRONT, RAIL_DOWN + RAIL_UP, C["accent-soft"], C.link2);
+    rect(W[0] + 9.5, W[1] - 42.9, 12.4, 29.9, C.panel, C.link2);
+    rect(W[0] - 1.1, tip[1], 33.5, TIP_DOWN - RAIL_DOWN, C.accent);
+
+    // block
+    const b = BLOCKS[S.block];
+    let bx = S.blockPos.x, bz = S.blockPos.z;
+    if (S.held) { bx = tip[0]; bz = tip[1] + S.heldDz; }
+    rect(bx - b.w / 2, bz, b.w, b.h, C.block, C.ink);
+
+    // pins
+    [Sp, E, W, Cp, T, G, H1, H2, K].forEach(p => pin(p, 3.2, C.panel, C.ink));
+    text("S", Sp[0] - 12, Sp[1] + 6, C.ink); text("E", E[0] + 7, E[1] + 5, C.ink); text("W", W[0] + 8, W[1] + 4, C.ink);
+
+    // tip marker
+    sx.strokeStyle = S.reason ? C.bad : C.ok; sx.lineWidth = 1.5;
+    sx.beginPath(); sx.arc(px(tip[0]), pz(tip[1]), 7, 0, 2 * Math.PI); sx.stroke();
+    if (S.ghost) { sx.setLineDash([3, 3]); sx.strokeStyle = C.bad; sx.beginPath(); sx.arc(px(S.ghost[0]), pz(S.ghost[1]), 7, 0, 2 * Math.PI); sx.stroke(); sx.setLineDash([]); }
+    drawInset();
+  }
+
+  // Front view of the jaws (they open sideways, out of the side view's plane).
+  function drawInset() {
+    const s = 1.4, w = 128, h = 96, x0 = sW - w - 8, y0 = 8, cx0 = x0 + w / 2, railY = y0 + 22, fingerH = 46;
+    sx.fillStyle = C.panel; sx.fillRect(x0, y0, w, h);
+    sx.strokeStyle = C.line; sx.lineWidth = 1; sx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, h - 1);
+    sx.font = `10px "IBM Plex Mono", ui-monospace, monospace`; sx.fillStyle = C.muted; sx.textAlign = "left";
+    sx.fillText("jaws, front view", x0 + 6, y0 + 13);
+    sx.fillStyle = C["accent-soft"]; sx.fillRect(x0 + 10, railY, w - 20, 7);
+    const half = S.gap / 2 * s, fw = 5 * s;
+    sx.fillStyle = C.accent;
+    sx.fillRect(cx0 - half - fw, railY + 7, fw, fingerH); sx.fillRect(cx0 + half, railY + 7, fw, fingerH);
+    if (S.held) { const b = BLOCKS[S.block]; sx.fillStyle = C.block; sx.fillRect(cx0 - b.w * s / 2, railY + 7 + fingerH - b.h * s, b.w * s, b.h * s); }
+    sx.fillStyle = C.ink; sx.textAlign = "center"; sx.fillText(`gap ${S.gap.toFixed(1)} mm`, cx0, y0 + h - 6);
+  }
+
+  // ---------- Joint-space plot ----------
+  const js = document.getElementById("jspace"), jx = js.getContext("2d");
+  const BLOCKED = [];   // 2-degree cells, computed once (the geometry is fixed)
+  for (let a = T1_MIN; a < T1_MAX; a += 2) for (let b = T2_MIN; b < T2_MAX; b += 2)
+    if (!jointReason(a + 1, b + 1) && collisionReason(a + 1, b + 1)) BLOCKED.push([a, b]);
+  const JV = { a0: -30, a1: 120, b0: -100, b1: 40 };  // t1 on x, t2 on y
+  let jW = 0, jH = 0;
+  const PAD = { l: 40, r: 10, t: 10, b: 30 };
+  const ja = a => PAD.l + (a - JV.a0) / (JV.a1 - JV.a0) * (jW - PAD.l - PAD.r);
+  const jb = b => jH - PAD.b - (b - JV.b0) / (JV.b1 - JV.b0) * (jH - PAD.t - PAD.b);
+  function drawJoint() {
+    jx.clearRect(0, 0, jW, jH);
+    jx.fillStyle = C.panel; jx.fillRect(0, 0, jW, jH);
+    jx.font = `11px "IBM Plex Mono", ui-monospace, monospace`; jx.fillStyle = C.muted;
+    for (let a = -30; a <= 120; a += 30) { jx.strokeStyle = C.grid; jx.beginPath(); jx.moveTo(ja(a), jb(JV.b0)); jx.lineTo(ja(a), jb(JV.b1)); jx.stroke(); jx.textAlign = "center"; jx.fillText(`${a}°`, ja(a), jH - PAD.b + 14); }
+    for (let b = -90; b <= 30; b += 30) { jx.strokeStyle = C.grid; jx.beginPath(); jx.moveTo(ja(JV.a0), jb(b)); jx.lineTo(ja(JV.a1), jb(b)); jx.stroke(); jx.textAlign = "right"; jx.fillText(`${b}°`, PAD.l - 5, jb(b) + 4); }
+    jx.textAlign = "center"; jx.fillText("upper arm θ1", (PAD.l + jW - PAD.r) / 2, jH - 3);
+    jx.save(); jx.translate(11, (PAD.t + jH - PAD.b) / 2); jx.rotate(-Math.PI / 2); jx.fillText("forearm θ2", 0, 0); jx.restore();
+    // safe polygon: box ∩ 20 ≤ t1 - t2 ≤ 160, computed by clipping
+    let pts = [[T1_MIN, T2_MIN], [T1_MAX, T2_MIN], [T1_MAX, T2_MAX], [T1_MIN, T2_MAX]];
+    const clip = (P, f) => { const out = []; for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length], fa = f(a), fb = f(b); if (fa >= 0) out.push(a); if ((fa >= 0) !== (fb >= 0)) { const t = fa / (fa - fb); out.push([a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]); } } return out; };
+    pts = clip(pts, p => (p[0] - p[1]) - REL_MIN);
+    pts = clip(pts, p => REL_MAX - (p[0] - p[1]));
+    jx.beginPath(); pts.forEach((p, i) => i ? jx.lineTo(ja(p[0]), jb(p[1])) : jx.moveTo(ja(p[0]), jb(p[1]))); jx.closePath();
+    jx.fillStyle = C.safe; jx.fill(); jx.strokeStyle = C.accent; jx.lineWidth = 1.2; jx.stroke();
+    // inside the limits but the claw or forearm would hit the deck, bracket or floor
+    jx.fillStyle = C.bad; jx.globalAlpha = 0.3;
+    BLOCKED.forEach(([a, b]) => jx.fillRect(ja(a), jb(b + 2), ja(a + 2) - ja(a) + 0.5, jb(b) - jb(b + 2) + 0.5));
+    jx.globalAlpha = 1;
+    // presets
+    Object.entries(PRESETS).forEach(([n, p]) => { const r = ik(...p); jx.fillStyle = C.muted; jx.beginPath(); jx.arc(ja(r.t1), jb(r.t2), 3, 0, 2 * Math.PI); jx.fill(); jx.textAlign = "left"; jx.fillText(n, ja(r.t1) + 5, jb(r.t2) - 4); });
+    // current
+    jx.fillStyle = S.reason ? C.bad : C.accent; jx.beginPath(); jx.arc(ja(S.t1), jb(S.t2), 5.5, 0, 2 * Math.PI); jx.fill();
+  }
+
+  // ---------- UI ----------
+  const $ = id => document.getElementById(id);
+  function setStatus() {
+    const st = $("status");
+    st.classList.toggle("bad", !!S.reason);
+    st.classList.toggle("warn", false);
+    if (S.reason) { $("statusText").textContent = S.reason[0]; $("statusSub").textContent = S.reason[1] + ". The firmware holds the last good pose."; }
+    else { $("statusText").textContent = "Inside the safe region"; $("statusSub").textContent = S.goal ? "Moving to preset at 90°/s" : "All limits clear"; }
+  }
+  function torques() {
+    const g = n => Math.max(0, parseFloat($(n).value) || 0) / 1000;  // kg
+    const mu = g("mUp"), mf = g("mFo"), mc = g("mCl") + g("mPl") * (S.held ? 1 : 0);
+    const c1 = Math.abs(Math.cos(rad(S.t1))), c2 = Math.abs(Math.cos(rad(S.t2)));
+    // gravity torque in kgf·cm: mass (kg) × horizontal lever (cm)
+    const tSh = (mu * 6.0 + (mf + mc) * 12.0) * c1;
+    const tEl = (mf * 5.0 + mc * 10.0) * c2;
+    return [tSh, tEl];
+  }
+  function setBar(fill, val, t) {
+    const pct = t / 9.4 * 100;
+    $(fill).style.width = Math.min(100, pct) + "%";
+    $(fill).style.background = pct < 30 ? C.ok : pct < 60 ? C.warn : C.bad;
+    $(val).textContent = `${t.toFixed(2)} · ${pct.toFixed(0)}%`;
+  }
+  function updateUI() {
+    const { tip } = fk(S.t1, S.t2);
+    $("rT1").textContent = `${S.t1.toFixed(1)}°`;
+    $("rT2").textContent = `${S.t2.toFixed(1)}°`;
+    $("rRel").textContent = `${(S.t1 - S.t2).toFixed(1)}°`;
+    $("rTip").textContent = `${tip[0].toFixed(0)}, ${tip[1].toFixed(0)} mm`;
+    $("rGap").textContent = `${S.gap.toFixed(1)} mm`;
+    $("tipxz").textContent = `tip x ${tip[0].toFixed(0)} · z ${tip[1].toFixed(0)}`;
+    const us1 = shUs(S.t1), us2 = elUs(S.t2), us3 = clUs(S.gap);
+    if (document.activeElement !== $("sSh")) $("sSh").value = us1;
+    if (document.activeElement !== $("sEl")) $("sEl").value = us2;
+    if (document.activeElement !== $("sCl")) $("sCl").value = us3;
+    $("oSh").textContent = `${us1.toFixed(0)} µs`; $("oEl").textContent = `${us2.toFixed(0)} µs`; $("oCl").textContent = `${us3.toFixed(0)} µs`;
+    $("clawLabel").textContent = S.gripping ? "Open" : "Grip";
+    $("clawBtn").setAttribute("aria-pressed", S.gripping ? "true" : "false");
+    $("blockLabel").textContent = `Block: ${BLOCKS[S.block].name}`;
+    const [a, b] = torques(); setBar("fSh", "vSh", a); setBar("fEl", "vEl", b);
+    setStatus();
+  }
+
+  function moveTipTo(x, z) {
+    const r = ik(x, z);
+    S.goal = null;
+    if (r.ok) { S.t1 = r.t1; S.t2 = r.t2; S.reason = null; S.ghost = null; }
+    else { S.reason = r.why; S.ghost = [x, z]; }
+  }
+  function goPreset(name) { const r = ik(...PRESETS[name]); if (r.ok) { S.goal = [r.t1, r.t2]; S.reason = null; S.ghost = null; } }
+  $("pPick").onclick = () => goPreset("pick");
+  $("pCarry").onclick = () => goPreset("carry");
+  $("pDrop").onclick = () => goPreset("drop");
+  $("pStow").onclick = () => goPreset("stow");
+
+  function grip() {
+    S.gripping = true; S.gapTarget = BLOCKS[S.block].w - SQUEEZE;
+  }
+  function release() {
+    S.gripping = false; S.gapTarget = OPEN_GAP;
+    if (S.held) {   // drop the block where it is: onto the wall top or the floor
+      const { tip } = fk(S.t1, S.t2), x = tip[0];
+      S.held = false; S.blockPos.x = x;
+      S.blockPos.z = (x > WALL.x - BLOCKS[S.block].w / 2 && x < WALL.x + WALL.w + BLOCKS[S.block].w / 2) ? WALL.h : 0;
+    }
+  }
+  $("clawBtn").onclick = () => (S.gripping ? release() : grip());
+  $("blockBtn").onclick = () => { if (S.held) return; S.block = S.block === "LEGO" ? "DUPLO" : "LEGO"; if (S.gripping) grip(); };
+
+  $("sSh").addEventListener("input", e => { const t1 = T1_C + (e.target.value - 1500) / SH_US_PER_DEG; S.goal = null; S.reason = limitReason(t1, S.t2); if (!S.reason) S.t1 = t1; S.ghost = null; });
+  $("sEl").addEventListener("input", e => { const t2 = T2_C + (e.target.value - 1500) / EL_US_PER_DEG; S.goal = null; S.reason = limitReason(S.t1, t2); if (!S.reason) S.t2 = t2; S.ghost = null; });
+  $("sCl").addEventListener("input", e => { const g = gapFromUs(+e.target.value); S.gapTarget = g; S.gripping = g < OPEN_GAP - 1; });
+  ["mUp", "mFo", "mCl", "mPl"].forEach(id => $(id).addEventListener("input", updateUI));
+
+  let dragging = false;
+  function pointerMM(ev) { const r = scene.getBoundingClientRect(); return toMM(ev.clientX - r.left, ev.clientY - r.top); }
+  scene.addEventListener("pointerdown", ev => { dragging = true; scene.setPointerCapture(ev.pointerId); moveTipTo(...pointerMM(ev)); });
+  scene.addEventListener("pointermove", ev => { if (dragging) moveTipTo(...pointerMM(ev)); });
+  scene.addEventListener("pointerup", () => { dragging = false; S.ghost = null; if (S.reason) S.reason = null; });
+  scene.addEventListener("keydown", ev => {
+    const d = { ArrowLeft: [-2, 0], ArrowRight: [2, 0], ArrowUp: [0, 2], ArrowDown: [0, -2] }[ev.key];
+    if (!d) return;
+    ev.preventDefault();
+    const { tip } = fk(S.t1, S.t2);
+    moveTipTo(tip[0] + d[0], tip[1] + d[1]);
+  });
+
+  // ---------- Loop ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    if (S.goal) {
+      const step = PRESET_DEG_S * dt;
+      const ap = (c, t) => Math.abs(t - c) <= step ? t : c + Math.sign(t - c) * step;
+      S.t1 = ap(S.t1, S.goal[0]); S.t2 = ap(S.t2, S.goal[1]);
+      if (S.t1 === S.goal[0] && S.t2 === S.goal[1]) S.goal = null;
+    }
+    const s = CLAW_MM_S * dt;
+    S.gap = Math.abs(S.gapTarget - S.gap) <= s ? S.gapTarget : S.gap + Math.sign(S.gapTarget - S.gap) * s;
+    // pick up: jaws closed onto the block while the tip is at block height
+    if (S.gripping && !S.held) {
+      const { tip } = fk(S.t1, S.t2), b = BLOCKS[S.block];
+      const inX = Math.abs(tip[0] - S.blockPos.x) < 6, inZ = tip[1] >= S.blockPos.z - 3 && tip[1] <= S.blockPos.z + b.h;
+      if (inX && inZ && S.gap <= b.w + 0.5) { S.held = true; S.heldDz = S.blockPos.z - tip[1]; }
+    }
+    drawScene(); drawJoint(); updateUI();
+    requestAnimationFrame(frame);
+  }
+  function resize() { layoutScene(); [jW, jH] = sizeCanvas(js, jx); }
+  window.addEventListener("resize", resize);
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>

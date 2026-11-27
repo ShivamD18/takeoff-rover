@@ -1,0 +1,21 @@
+# Claude session notes (personal, not project files)
+.remember/
+.claude/settings.local.json
+
+# Build output
+build/
+*.bin
+*.elf
+*.map
+*.o
+tools/arm_check
+
+# Unzipped CAD (commit the .zip in cad/ instead; the raw STEP is over GitHub's 50 MB warning)
+*.stp
+*.step
+
+# Editor / OS clutter
+.vscode/
+.idea/
+.DS_Store
+*~
