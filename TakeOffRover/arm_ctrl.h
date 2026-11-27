@@ -22,12 +22,21 @@ public:
   }
 
   // Start a preset move. Returns false if the target itself is not allowed.
+  // The move runs as a profile along its own length in degrees, so it accelerates away
+  // from the start pose and decelerates into the target instead of jerking at both ends.
   bool goTo(const Pose &p) {
     float a, b;
     if (!arm::solveIK(p.x, p.z, a, b)) return false;
-    st1_ = t1_; st2_ = t2_; gt1_ = a; gt2_ = b; f_ = 0.0f;
-    float span = fmaxf(fabsf(gt1_ - st1_), fabsf(gt2_ - st2_));
-    rate_ = span > 0.01f ? ARM_PRESET_DEG_S / span : 1000.0f;   // fraction of the move per second
+    st1_ = t1_; st2_ = t2_; gt1_ = a; gt2_ = b;
+    span_ = fmaxf(fabsf(gt1_ - st1_), fabsf(gt2_ - st2_));
+    move_ = motion::State{};
+    if (span_ <= 0.01f) {                      // already there
+      t1_ = gt1_; t2_ = gt2_;
+      arm::forwardTip(t1_, t2_, x_, z_);
+      presetActive_ = false;
+      write();
+      return true;
+    }
     presetActive_ = true;
     return true;
   }
@@ -35,21 +44,33 @@ public:
   // vx, vz in [-1, 1] from the right stick. Any stick input cancels a preset move.
   void update(float vx, float vz, float dt) {
     blocked_ = false;
-    if (vx != 0.0f || vz != 0.0f) {
-      presetActive_ = false;
-      float dx = vx * ARM_TRIM_MM_S * dt, dz = vz * ARM_TRIM_MM_S * dt;
+    bool stick = (vx != 0.0f || vz != 0.0f);
+    if (stick) presetActive_ = false;
+
+    if (stick || tvx_ != 0.0f || tvz_ != 0.0f) {
+      // Ramp the tip velocity rather than jumping to it. Releasing the stick glides to a
+      // stop over ARM_TRIM_DECEL_MM_S2 instead of halting the servos mid-sweep.
+      tvx_ = approach(tvx_, vx * ARM_TRIM_MM_S, dt);
+      tvz_ = approach(tvz_, vz * ARM_TRIM_MM_S, dt);
+      float dx = tvx_ * dt, dz = tvz_ * dt;
       // Try the full move, then each axis alone, so the tip slides along a limit
-      // instead of freezing when one direction is blocked.
-      if (!tryTip(x_ + dx, z_ + dz) && !(dx != 0.0f && tryTip(x_ + dx, z_)) &&
-          !(dz != 0.0f && tryTip(x_, z_ + dz)))
-        blocked_ = true;
+      // instead of freezing when one direction is blocked. Zero the velocity of whichever
+      // axis is against the limit, or it winds up and lurches when the tip comes free.
+      if (!tryTip(x_ + dx, z_ + dz)) {
+        bool okX = dx != 0.0f && tryTip(x_ + dx, z_);
+        bool okZ = !okX && dz != 0.0f && tryTip(x_, z_ + dz);
+        if (okX)      tvz_ = 0.0f;
+        else if (okZ) tvx_ = 0.0f;
+        else { tvx_ = tvz_ = 0.0f; blocked_ = true; }
+      }
     } else if (presetActive_) {
-      float f = fminf(1.0f, f_ + rate_ * dt);
+      bool done = motion::step(move_, span_, dt, ARM_PRESET_DEG_S, ARM_PRESET_ACCEL_DEG_S2);
+      float f = move_.pos / span_;
       float a = st1_ + f * (gt1_ - st1_), b = st2_ + f * (gt2_ - st2_);
       if (arm::poseAllowed(a, b)) {
-        f_ = f; t1_ = a; t2_ = b;
+        t1_ = a; t2_ = b;
         arm::forwardTip(t1_, t2_, x_, z_);
-        if (f_ >= 1.0f) presetActive_ = false;
+        if (done) presetActive_ = false;
       } else {
         presetActive_ = false;   // path runs into the deck or a limit: stop where we are
         blocked_ = true;
@@ -58,7 +79,9 @@ public:
     write();
   }
 
-  void hold() { presetActive_ = false; write(); }   // keep pulses alive, stop moving
+  // Keep pulses alive but stop moving. Velocities are cleared so a reconnect does not
+  // resume a sweep the driver started before the link dropped.
+  void hold() { presetActive_ = false; tvx_ = tvz_ = 0.0f; write(); }
 
   bool blocked() const { return blocked_; }
   float tipX() const { return x_; }
@@ -68,8 +91,18 @@ public:
 
 private:
   float t1_ = arm::SHOULDER.centreDeg, t2_ = arm::ELBOW.centreDeg, x_ = 0, z_ = 0;
-  float st1_ = 0, st2_ = 0, gt1_ = 0, gt2_ = 0, f_ = 0, rate_ = 0;
+  float st1_ = 0, st2_ = 0, gt1_ = 0, gt2_ = 0, span_ = 0;
+  float tvx_ = 0, tvz_ = 0;                  // tip velocity, mm/s
+  motion::State move_;                       // progress in degrees along a preset move
   bool presetActive_ = false, blocked_ = false;
+
+  // Same asymmetry as drive.h's ramp: accelerate gently, brake harder.
+  static float approach(float cur, float tgt, float dt) {
+    bool speedingUp = (cur * tgt >= 0.0f) && fabsf(tgt) > fabsf(cur);
+    float step = (speedingUp ? ARM_TRIM_ACCEL_MM_S2 : ARM_TRIM_DECEL_MM_S2) * dt;
+    if (tgt > cur) return fminf(tgt, cur + step);
+    return fmaxf(tgt, cur - step);
+  }
 
   bool tryTip(float nx, float nz) {
     float a, b;
@@ -137,9 +170,9 @@ public:
       if (relieved > target_) { target_ = relieved; slow_ = true; }
     }
 
-    claw::Motion m{gap_, vel_};
-    bool arrived = claw::step(m, target_, dt, slow_ ? CLAW_RELIEF_MM_S : CLAW_MM_S, CLAW_ACCEL_MM_S2);
-    gap_ = m.gap;
+    motion::State m{gap_, vel_};
+    bool arrived = motion::step(m, target_, dt, slow_ ? CLAW_RELIEF_MM_S : CLAW_MM_S, CLAW_ACCEL_MM_S2);
+    gap_ = m.pos;
     vel_ = m.vel;
     if (arrived) slow_ = false;                  // next command runs at full speed again
     write();

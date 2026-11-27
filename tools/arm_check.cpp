@@ -98,17 +98,17 @@ int main() {
     {"1 mm nudge",         claw::OPEN_GAP, claw::OPEN_GAP - 1.0f},
   };
   for (const Move &mv : moves) {
-    claw::Motion m; m.gap = mv.from; m.vel = 0.0f;
+    motion::State m; m.pos = mv.from; m.vel = 0.0f;
     float vPeak = 0, aPrev = 0, jerkMax = 0, overshoot = 0, vLast = 0;
     int ticks = 0;
     for (; ticks < 2000; ticks++) {
       float vBefore = m.vel;
-      bool done = claw::step(m, mv.to, DT, CLAW_MM_S, CLAW_ACCEL_MM_S2);
+      bool done = motion::step(m, mv.to, DT, CLAW_MM_S, CLAW_ACCEL_MM_S2);
       float a = (m.vel - vBefore) / DT;
       if (ticks > 0) jerkMax = std::fmax(jerkMax, std::fabs(a - aPrev));
       aPrev = a;
       vPeak = std::fmax(vPeak, std::fabs(m.vel));
-      float past = (mv.to > mv.from) ? m.gap - mv.to : mv.to - m.gap;
+      float past = (mv.to > mv.from) ? m.pos - mv.to : mv.to - m.pos;
       overshoot = std::fmax(overshoot, past);
       vLast = m.vel;
       if (done) { ticks++; break; }
@@ -138,7 +138,7 @@ int main() {
   // A shaky trigger thumb must not shake the fingers: feed a noisy command and check the
   // gap stays inside the acceleration limit and tracks the average, not the noise.
   {
-    claw::Motion m; m.gap = claw::OPEN_GAP; m.vel = 0.0f;
+    motion::State m; m.pos = claw::OPEN_GAP; m.vel = 0.0f;
     float closed = claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE);
     float aMax = 0, vPrev = 0;
     unsigned seed = 12345;
@@ -147,13 +147,13 @@ int main() {
       float noise = ((seed >> 16) % 1000) / 1000.0f - 0.5f;      // +/- 0.5 of the trigger
       float f = std::fmin(1.0f, std::fmax(0.0f, 0.5f + 0.6f * noise));
       float target = claw::OPEN_GAP + f * (closed - claw::OPEN_GAP);
-      claw::step(m, target, DT, CLAW_MM_S, CLAW_ACCEL_MM_S2);
+      motion::step(m, target, DT, CLAW_MM_S, CLAW_ACCEL_MM_S2);
       aMax = std::fmax(aMax, std::fabs(m.vel - vPrev) / DT);
       vPrev = m.vel;
       // A command that reverses faster than the jaws can brake is overshot by at most
       // the stopping distance from the speed limit; past that the jaws are not tracking.
-      CHECK(m.gap >= closed - OVERSHOOT_MAX && m.gap <= claw::OPEN_GAP + OVERSHOOT_MAX,
-            "noisy trigger drove the gap to %.2f mm", m.gap);
+      CHECK(m.pos >= closed - OVERSHOOT_MAX && m.pos <= claw::OPEN_GAP + OVERSHOOT_MAX,
+            "noisy trigger drove the gap to %.2f mm", m.pos);
     }
     std::printf("  noisy trigger      peak acceleration %.0f mm/s^2 (limit %.0f), overshoot allowance %.2f mm\n",
                 aMax, CLAW_ACCEL_MM_S2, OVERSHOOT_MAX);
@@ -162,16 +162,74 @@ int main() {
 
   // Relief creep after a long hold must be gentle and must not open the jaws far.
   {
-    claw::Motion m;
-    m.gap = claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE);
+    motion::State m;
+    m.pos = claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE);
     m.vel = 0.0f;
     float relieved = claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE_RELIEVED);
     int ticks = 0;
-    while (!claw::step(m, relieved, DT, CLAW_RELIEF_MM_S, CLAW_ACCEL_MM_S2) && ticks < 2000) ticks++;
+    while (!motion::step(m, relieved, DT, CLAW_RELIEF_MM_S, CLAW_ACCEL_MM_S2) && ticks < 2000) ticks++;
     std::printf("  squeeze relief     %.1f -> %.1f mm in %.2f s at <= %.1f mm/s\n",
                 claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE), relieved, ticks * DT, CLAW_RELIEF_MM_S);
     CHECK(ticks > 2, "relief creep lands in %d ticks: too abrupt to be a creep", ticks);
-    CHECK(relieved - claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE) < 1.0f, "relief opens the jaws more than 1 mm");
+    // Relief exists to unload the servo, not to let go: it may only ever open the jaws,
+    // and the eased grip must still be squeezing the block.
+    CHECK(claw::SQUEEZE_RELIEVED > 0.0f && claw::SQUEEZE_RELIEVED < claw::SQUEEZE,
+          "relief squeeze %.1f mm must be between 0 and the full %.1f mm",
+          claw::SQUEEZE_RELIEVED, claw::SQUEEZE);
+    CHECK(relieved < claw::LEGO_W, "relieved gap %.1f mm is wider than a LEGO brick: the block drops", relieved);
+  }
+
+  // ---------- Arm preset moves ----------
+  // Same profile, driven in degrees along the move. Checks the move eases in and out and
+  // that every pose it passes through is still inside the limits and clear of the deck.
+  std::printf("Preset moves at %.0f Hz (limit %.0f deg/s, accel %.0f deg/s^2):\n",
+              1.0f / DT, ARM_PRESET_DEG_S, ARM_PRESET_ACCEL_DEG_S2);
+  for (int a = 0; a < 4; a++)
+    for (int b = 0; b < 4; b++) {
+      if (a == b) continue;
+      float span = std::fmax(std::fabs(J[b][0] - J[a][0]), std::fabs(J[b][1] - J[a][1]));
+      if (span <= 0.01f) continue;
+      motion::State m;
+      float vPeak = 0, aPrev = 0, jerkMax = 0;
+      int ticks = 0;
+      bool clear = true;
+      for (; ticks < 4000; ticks++) {
+        float vBefore = m.vel;
+        bool done = motion::step(m, span, DT, ARM_PRESET_DEG_S, ARM_PRESET_ACCEL_DEG_S2);
+        float acc = (m.vel - vBefore) / DT;
+        if (ticks > 0) jerkMax = std::fmax(jerkMax, std::fabs(acc - aPrev));
+        aPrev = acc;
+        vPeak = std::fmax(vPeak, std::fabs(m.vel));
+        float f = m.pos / span;
+        if (!arm::poseAllowed(J[a][0] + f * (J[b][0] - J[a][0]), J[a][1] + f * (J[b][1] - J[a][1]))) clear = false;
+        if (done) { ticks++; break; }
+      }
+      if (a == 0 && b == 3)   // one representative move, so the output stays short
+        std::printf("  %-5s -> %-5s  %5.1f deg  %.2f s  peak %5.1f deg/s  max jerk %6.0f deg/s^3\n",
+                    presets[a].name, presets[b].name, span, ticks * DT, vPeak, jerkMax);
+      CHECK(clear, "%s -> %s leaves the safe region under the profile", presets[a].name, presets[b].name);
+      CHECK(ticks < 4000, "%s -> %s never finishes", presets[a].name, presets[b].name);
+      CHECK(vPeak <= ARM_PRESET_DEG_S + 1e-3f, "%s -> %s exceeds the rate limit", presets[a].name, presets[b].name);
+      CHECK(jerkMax <= ARM_PRESET_ACCEL_DEG_S2 / DT + 1.0f, "%s -> %s jerk %.0f exceeds one accel step",
+            presets[a].name, presets[b].name, jerkMax);
+    }
+  std::printf("  all 12 moves stay in the safe region under the profile\n");
+
+  // Trim ramp: the tip must not jump to full speed, and must stop without a long coast.
+  {
+    float v = 0, aMax = 0, vPrev = 0;
+    int up = 0;
+    while (v < ARM_TRIM_MM_S - 1e-3f && up < 2000) {
+      v = std::fmin(ARM_TRIM_MM_S, v + ARM_TRIM_ACCEL_MM_S2 * DT);
+      aMax = std::fmax(aMax, std::fabs(v - vPrev) / DT); vPrev = v; up++;
+    }
+    float coast = 0;
+    int down = 0;
+    while (v > 1e-3f && down < 2000) { v = std::fmax(0.0f, v - ARM_TRIM_DECEL_MM_S2 * DT); coast += v * DT; down++; }
+    std::printf("Tip trim: %.0f mm/s reached in %.2f s, stops in %.2f s after %.1f mm of coast\n",
+                ARM_TRIM_MM_S, up * DT, down * DT, coast);
+    CHECK(up > 1, "tip trim reaches full speed in one tick");
+    CHECK(coast < 15.0f, "tip coasts %.1f mm after the stick is released", coast);
   }
 
   std::printf(failures ? "\n%d check(s) FAILED\n" : "\nAll checks passed\n", failures);

@@ -64,6 +64,21 @@ Pick (170, 5) · Carry (140, 60) · Drop over wall (200, 55) · Stow (115, 120).
 The Stow preset matches the pose the CAD is drawn in. `tools/arm_check` confirms each preset is ≥17° inside every joint limit
 and that all 12 moves between presets stay clear of the deck and bracket.
 
+## Arm and claw motion
+
+Both the arm and the jaws run one shared profile (`motion::step` in `arm_kinematics.h`, pure math so
+`tools/arm_check` tests the same code the firmware runs). Nothing steps to full speed in a single 20 ms
+tick or stops dead on arrival any more.
+
+**Preset moves** run along the move's own length in degrees, so they accelerate away from the start pose and
+decelerate into the target. Pick → Stow is 64.3° and takes 0.98 s, peak jerk 300 °/s³ against the old ramp's
+effectively infinite one. `ARM_PRESET_ACCEL_DEG_S2` is the dial.
+
+**Right-stick trim** ramps the tip velocity instead of snapping to it, and brakes harder than it accelerates
+(the same asymmetry `drive.h` already uses for the motors): full speed in 0.20 s, stopping in 0.08 s after
+about 2.9 mm of coast. Whichever axis is against a limit has its velocity zeroed, so it cannot wind up and
+lurch when the tip comes free.
+
 ## Claw motion
 
 The jaws run a speed- and acceleration-limited profile (`claw::step` in `arm_kinematics.h`, pure math so
@@ -84,7 +99,12 @@ stopped dead on arrival, which is the snatch. Tunables are in `config.h`:
 | `CLAW_ACCEL_MM_S2` | 420 mm/s² | Ease in/out; reaches peak speed in ~0.13 s. Lower it for a gentler feel, raise it for a snappier one |
 | `CLAW_TRIGGER_DB` | 0.06 | RT travel ignored before the trigger takes over |
 | `CLAW_TRIGGER_TAU` | 0.05 s | RT smoothing, so thumb shake and ADC noise don't reach the fingers |
-| `CLAW_RELIEF_MM_S` | 2.5 mm/s | Creep rate when easing a long squeeze (was a step, now ~0.26 s) |
+| `CLAW_RELIEF_MM_S` | 2.5 mm/s | Creep rate when easing a long squeeze |
+| `claw::SQUEEZE` | 3.0 mm | How far past contact the jaws close. **This is the grip-strength dial** |
+| `claw::MIN_US` | 700 µs | The fully-open end. This alone caps how wide the jaws go |
+
+`OPEN_GAP` is now derived from `MIN_US` rather than being a fixed millimetre figure, so "open" always means
+the open pulse limit and capping the opening is a one-line change that survives recalibration.
 
 **RT squeezes the claw proportionally** and overrides the RB latch while held; let go and the jaws hold the gap they
 reached, so a block stays gripped without keeping a finger on the trigger. RB still toggles full open / full grip for
@@ -138,7 +158,7 @@ g++ -std=c++17 -O2 -Wall -ITakeOffRover tools/arm_check.cpp -o /tmp/arm_check &&
 
 - If you change geometry, presets, servo signs or the claw motion profile in `arm_kinematics.h` / `config.h`, make the
   same change at the top of the script in both pages (they keep their own copy of the numbers). `CLAW_MM_S` /
-  `CLAW_ACCEL` and the profile block in each page's frame loop must match `claw::step`.
+  `CLAW_ACCEL`, `PRESET_ACCEL` and the two profile blocks in each page's frame loop must match `motion::step`.
 - The claw's `REF_GAP`, `US_PER_DEG`, `MIN_US` and `MAX_US` are still placeholders, so the *gap in mm* the firmware
   thinks it has is not yet the real one. The motion is smooth either way — the profile works in mm and only the mm-to-µs
   mapping is uncalibrated — but grip width is not trustworthy until step 5 of bring-up is done.

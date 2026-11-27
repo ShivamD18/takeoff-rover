@@ -45,8 +45,15 @@ constexpr float DECEL_PER_S     = 6.0f;
 constexpr float MIN_EFFECTIVE   = 0.25f;    // CAL: smallest duty that turns the wheels
 
 // ---------- Arm feel ----------
-constexpr float ARM_TRIM_MM_S    = 120.0f;  // right-stick tip speed
-constexpr float ARM_PRESET_DEG_S = 90.0f;   // fastest joint during a preset move
+// The arm runs the same profile as the jaws (motion::step), so presets ease in and out
+// instead of starting and stopping dead, and the right stick ramps the tip rather than
+// snapping it to full speed in one tick. Trim decelerates harder than it accelerates, the
+// same asymmetry drive.h uses, so letting go of the stick does not coast far.
+constexpr float ARM_TRIM_MM_S           = 120.0f;  // right-stick tip speed
+constexpr float ARM_TRIM_ACCEL_MM_S2    = 600.0f;  // tip ramps up in ~0.2 s
+constexpr float ARM_TRIM_DECEL_MM_S2    = 1800.0f; // and stops in ~0.07 s (~4 mm of coast)
+constexpr float ARM_PRESET_DEG_S        = 90.0f;   // fastest joint during a preset move
+constexpr float ARM_PRESET_ACCEL_DEG_S2 = 320.0f;  // ease in/out of a preset move
 
 // ---------- Claw feel ----------
 // The jaws run a speed- and acceleration-limited profile, so they ease in and out of

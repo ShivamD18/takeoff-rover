@@ -14,6 +14,52 @@
 #include <math.h>
 #include <stdint.h>
 
+namespace motion {
+
+// ---------- Motion profile ----------
+// Speed- and acceleration-limited (trapezoidal) control of one scalar. Pure math, so
+// tools/arm_check.cpp tests the same code the firmware runs. Call step() once per
+// control tick: the value never changes speed by more than accel*dt, and it decelerates
+// into the target rather than stopping dead, which is what a human feels as smooth.
+// Tracking a target that keeps moving (an analog trigger, a stick) works the same way.
+// The jaws drive it in mm; the arm drives it in degrees along a preset move.
+struct State { float pos = 0.0f, vel = 0.0f; };
+
+inline bool atRest(const State &m, float target) {
+  return fabsf(target - m.pos) < 1e-3f && fabsf(m.vel) < 1e-3f;
+}
+
+// Returns true once the value is parked on the target with zero speed.
+inline bool step(State &m, float target, float dt, float vLimit, float accel) {
+  if (atRest(m, target)) { m.pos = target; m.vel = 0.0f; return true; }
+  float d = target - m.pos;
+  float dist = fabsf(d);
+  float dv = accel * dt;
+
+  // Largest speed we could still stop from inside the distance left. The continuous
+  // answer, sqrt(2*accel*dist), is slightly too fast for a discrete tick: braking by dv
+  // per tick from v actually covers v*v/(2*accel) + v*dt/2. Solving that for v is what
+  // lets it arrive already at zero speed, instead of needing to be stopped dead on
+  // the tick they land -- which is the jolt a human feels as the claw snatching.
+  float vStop = 0.5f * dv * (sqrtf(1.0f + 8.0f * dist / (dv * dt)) - 1.0f);
+  float vWant = (d > 0.0f ? 1.0f : -1.0f) * fminf(vLimit, vStop);
+
+  m.vel = (m.vel < vWant) ? fminf(vWant, m.vel + dv) : fmaxf(vWant, m.vel - dv);
+  m.pos += m.vel * dt;
+
+  // Landing. Snapping the last float residue away is free only while the speed left is
+  // inside one tick of braking; above that -- which means the target itself jumped, as a
+  // reversing trigger does -- it keeps decelerating and overshoot slightly rather
+  // than taking an unbounded stop. Position follows the command late; acceleration is
+  // never broken.
+  if ((d > 0.0f && m.pos >= target) || (d < 0.0f && m.pos <= target)) {
+    if (fabsf(m.vel) <= dv) { m.pos = target; m.vel = 0.0f; return true; }
+  }
+  return false;
+}
+
+} // namespace motion
+
 namespace arm {
 
 constexpr float DEG = 57.2957795f;
@@ -146,57 +192,24 @@ constexpr float US_PER_DEG  = 10.0f;    // CAL: SG90 pulse per degree
 constexpr float REF_US      = 1500.0f;  // CAL: pulse at which REF_GAP was measured
 constexpr float REF_GAP     = 30.0f;    // CAL: measured gap at REF_US (mm)
 constexpr float OPEN_SIGN   = -1.0f;    // a SHORTER pulse opens the claw (checked on the rover 2026-11-26)
-constexpr float MIN_US = 700.0f, MAX_US = 2300.0f;  // CAL: just inside the finger stops
+constexpr float MIN_US = 700.0f, MAX_US = 2300.0f;  // CAL: just inside the finger stops.
+// MIN_US is the fully-open end (shorter pulse opens), so it alone caps how wide the jaws go.
+
+// Gap a given pulse produces: the inverse of usForGap below.
+constexpr float gapForUs(float us) { return REF_GAP + OPEN_SIGN * (us - REF_US) / US_PER_DEG * GAP_PER_DEG; }
 
 enum class Block : uint8_t { LEGO, DUPLO };
 constexpr float LEGO_W   = 15.8f;   // 2xN brick, gripped across the narrow side
 constexpr float DUPLO_W  = 31.7f;
-constexpr float OPEN_GAP = 45.0f;   // just inside the 45.8 mm CAD maximum
-constexpr float SQUEEZE  = 1.5f;    // mm past contact, taken up by the rubber pads
-constexpr float SQUEEZE_RELIEVED = 0.8f;
+// Open = the open pulse limit, not a fixed millimetre figure. Capping how wide the jaws
+// open is therefore a change to MIN_US alone, and it stays correct through recalibration
+// instead of drifting away from whatever OPEN_GAP was once measured to be.
+constexpr float OPEN_GAP = gapForUs(MIN_US);
+constexpr float SQUEEZE  = 3.0f;    // CAL: mm past contact, taken up by the rubber pads
+constexpr float SQUEEZE_RELIEVED = 1.8f;
 
 inline float gapForGrip(Block b, float squeeze) { return (b == Block::LEGO ? LEGO_W : DUPLO_W) - squeeze; }
 
-// ---------- Jaw motion profile ----------
-// Speed- and acceleration-limited (trapezoidal) gap control. Pure math, so
-// tools/arm_check.cpp tests the same code the firmware runs. Call step() once per
-// control tick: the gap never changes speed by more than accel*dt, and it decelerates
-// into the target rather than stopping dead, which is what the fingers feel as smooth.
-// Tracking a target that keeps moving (the analog trigger) works the same way.
-struct Motion { float gap = 0.0f, vel = 0.0f; };
-
-inline bool atRest(const Motion &m, float target) {
-  return fabsf(target - m.gap) < 1e-3f && fabsf(m.vel) < 1e-3f;
-}
-
-// Returns true once the jaws are parked on the target with zero speed.
-inline bool step(Motion &m, float target, float dt, float vLimit, float accel) {
-  if (atRest(m, target)) { m.gap = target; m.vel = 0.0f; return true; }
-  float d = target - m.gap;
-  float dist = fabsf(d);
-  float dv = accel * dt;
-
-  // Largest speed the jaws could still stop from inside the distance left. The continuous
-  // answer, sqrt(2*accel*dist), is slightly too fast for a discrete tick: braking by dv
-  // per tick from v actually covers v*v/(2*accel) + v*dt/2. Solving that for v is what
-  // lets the jaws arrive already at zero speed, instead of needing to be stopped dead on
-  // the tick they land -- which is the jolt a human feels as the claw snatching.
-  float vStop = 0.5f * dv * (sqrtf(1.0f + 8.0f * dist / (dv * dt)) - 1.0f);
-  float vWant = (d > 0.0f ? 1.0f : -1.0f) * fminf(vLimit, vStop);
-
-  m.vel = (m.vel < vWant) ? fminf(vWant, m.vel + dv) : fmaxf(vWant, m.vel - dv);
-  m.gap += m.vel * dt;
-
-  // Landing. Snapping the last float residue away is free only while the speed left is
-  // inside one tick of braking; above that -- which means the target itself jumped, as a
-  // reversing trigger does -- the jaws keep decelerating and overshoot slightly rather
-  // than taking an unbounded stop. Position follows the command late; acceleration is
-  // never broken.
-  if ((d > 0.0f && m.gap >= target) || (d < 0.0f && m.gap <= target)) {
-    if (fabsf(m.vel) <= dv) { m.gap = target; m.vel = 0.0f; return true; }
-  }
-  return false;
-}
 // Rounded, not truncated: a half-microsecond bias here is a 0.015 mm step in the gap,
 // but truncation also makes the pulse change one tick early on the way down and late on
 // the way up, which the SG90 shows as a tiny hitch mid-move.
