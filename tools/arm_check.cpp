@@ -3,7 +3,9 @@
 // Exit code 0 = all checks passed.
 #include <cstdio>
 #include <cmath>
+#include <initializer_list>
 #include "arm_kinematics.h"
+#include "drive_mix.h"
 #include "config.h"
 
 static constexpr float DT = 0.02f;   // the firmware's 50 Hz control tick
@@ -236,6 +238,81 @@ int main() {
                 ARM_TRIM_MM_S, up * DT, down * DT, coast);
     CHECK(up > 1, "tip trim reaches full speed in one tick");
     CHECK(coast < 15.0f, "tip coasts %.1f mm after the stick is released", coast);
+  }
+
+  // ---------- Drive mixing ----------
+  {
+    auto ratio = [](float a, float b) { return b > 1e-6f ? a / b : 0.0f; };
+    std::printf("Drive, MIN_EFFECTIVE %.2f, pair floor %s:\n", MIN_EFFECTIVE,
+                PRESERVE_TURN_RATIO ? "on" : "off");
+    struct Case { const char *name; float thr, turn, scale; } cases[] = {
+      {"straight, full",   1.0f, 0.0f,  1.0f},
+      {"straight, half",   0.5f, 0.0f,  1.0f},
+      {"gentle arc",       1.0f, 0.25f, 1.0f},
+      {"precision arc",    0.3f, 0.25f, PRECISION_SCALE},
+      {"spin in place",    0.0f, 1.0f,  1.0f},
+    };
+    for (const Case &cse : cases) {
+      float l, r;
+      drivemix::mix(cse.thr, cse.turn, TURN_GAIN, cse.scale, l, r);
+      drivemix::Out ol, orr;
+      drivemix::duties(l, r, MIN_EFFECTIVE, PRESERVE_TURN_RATIO, DRIVE_IDLE_EPS, ol, orr);
+      auto word = [](const drivemix::Out &o) {
+        return o.mode == drivemix::Mode::Brake ? "brake" : o.mode == drivemix::Mode::Coast ? "coast" : "drive";
+      };
+      std::printf("  %-15s cmd %+5.2f/%+5.2f (%.2f:1)  ->  %s %.2f / %s %.2f",
+                  cse.name, l, r, ratio(std::fabs(l), std::fabs(r)), word(ol), ol.duty, word(orr), orr.duty);
+      if (ol.mode == drivemix::Mode::Drive && orr.mode == drivemix::Mode::Drive)
+        std::printf("  (%.2f:1)", ratio(ol.duty, orr.duty));
+      std::printf("\n");
+
+      // The commanded ratio must survive the duty map whenever both sides are driven.
+      if (PRESERVE_TURN_RATIO && ol.mode == drivemix::Mode::Drive && orr.mode == drivemix::Mode::Drive
+          && std::fabs(r) > 1e-6f) {
+        float want = ratio(std::fabs(l), std::fabs(r)), got = ratio(ol.duty, orr.duty);
+        CHECK(std::fabs(want - got) < 0.02f, "%s: commanded %.2f:1 came out %.2f:1", cse.name, want, got);
+      }
+      // Nothing may ever be driven below the duty that turns a wheel, or above full.
+      for (const drivemix::Out *o : {&ol, &orr})
+        if (o->mode == drivemix::Mode::Drive)
+          CHECK(o->duty >= MIN_EFFECTIVE - 1e-6f && o->duty <= 1.0f,
+                "%s: duty %.3f outside [%.2f, 1]", cse.name, o->duty, MIN_EFFECTIVE);
+    }
+
+    // Straight-line behaviour must be exactly what the per-side floor gave, so the change
+    // only ever affects turns.
+    for (float thr = 0.05f; thr <= 1.0f; thr += 0.05f) {
+      float l, r; drivemix::Out ol, orr;
+      drivemix::mix(thr, 0.0f, TURN_GAIN, 1.0f, l, r);
+      drivemix::duties(l, r, MIN_EFFECTIVE, PRESERVE_TURN_RATIO, DRIVE_IDLE_EPS, ol, orr);
+      float legacy = MIN_EFFECTIVE + (1.0f - MIN_EFFECTIVE) * thr;
+      CHECK(ol.mode == drivemix::Mode::Drive && std::fabs(ol.duty - legacy) < 1e-4f,
+            "straight at %.2f changed: %.3f vs %.3f", thr, ol.duty, legacy);
+      CHECK(std::fabs(ol.duty - orr.duty) < 1e-6f, "straight at %.2f is not symmetric", thr);
+    }
+
+    // Turn authority: sweep a turn across the speed range and report the worst ratio error.
+    float worst = 0.0f, worstAt = 0.0f;
+    for (float thr = 0.1f; thr <= 1.0f; thr += 0.02f) {
+      float l, r; drivemix::Out ol, orr;
+      drivemix::mix(thr, 0.3f, TURN_GAIN, 1.0f, l, r);
+      drivemix::duties(l, r, MIN_EFFECTIVE, PRESERVE_TURN_RATIO, DRIVE_IDLE_EPS, ol, orr);
+      if (ol.mode != drivemix::Mode::Drive || orr.mode != drivemix::Mode::Drive) continue;
+      float want = ratio(std::fabs(l), std::fabs(r)), got = ratio(ol.duty, orr.duty);
+      float err = std::fabs(want - got) / want;
+      if (err > worst) { worst = err; worstAt = thr; }
+    }
+    std::printf("  worst turn-ratio error across the speed range: %.1f%% (at throttle %.2f)\n", worst * 100, worstAt);
+    if (PRESERVE_TURN_RATIO) CHECK(worst < 0.02f, "turn ratio still distorted by %.0f%%", worst * 100);
+
+    // A side commanded but coasted must be the INNER one, never the outer.
+    for (float turn = 0.05f; turn <= 1.0f; turn += 0.05f) {
+      float l, r; drivemix::Out ol, orr;
+      drivemix::mix(0.5f, turn, TURN_GAIN, 1.0f, l, r);
+      drivemix::duties(l, r, MIN_EFFECTIVE, PRESERVE_TURN_RATIO, DRIVE_IDLE_EPS, ol, orr);
+      if (ol.mode == drivemix::Mode::Coast) CHECK(std::fabs(l) <= std::fabs(r), "outer side coasted at turn %.2f", turn);
+      if (orr.mode == drivemix::Mode::Coast) CHECK(std::fabs(r) <= std::fabs(l), "outer side coasted at turn %.2f", turn);
+    }
   }
 
   std::printf(failures ? "\n%d check(s) FAILED\n" : "\nAll checks passed\n", failures);

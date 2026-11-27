@@ -39,10 +39,18 @@ constexpr bool  RIGHT_INVERT = true;
 constexpr float STICK_DEADBAND  = 0.08f;
 constexpr float EXPO            = 0.6f;     // 0 = linear, 1 = cubic
 constexpr float TURN_GAIN       = 0.8f;
-constexpr float PRECISION_SCALE = 0.35f;    // hold LB
+constexpr float PRECISION_SCALE = 0.35f;    // hold LB (drive speed)
+constexpr float ARM_PRECISION_SCALE = 0.4f; // hold LB: tip trim speed too, for lining up on a block
 constexpr float ACCEL_PER_S     = 3.3f;     // 0 -> full in ~0.3 s
 constexpr float DECEL_PER_S     = 6.0f;
 constexpr float MIN_EFFECTIVE   = 0.25f;    // CAL: smallest duty that turns the wheels
+                                            // DriveBenchTest's creep test measures this.
+// Apply MIN_EFFECTIVE to the PAIR rather than to each side, so a turn keeps its commanded
+// ratio instead of having the inner wheel floored up until it fights the turn. A side
+// whose share lands below MIN_EFFECTIVE coasts, since that duty cannot turn a wheel.
+// Set false to go back to the per-side floor if the rover drives better that way.
+constexpr bool  PRESERVE_TURN_RATIO = true;
+constexpr float DRIVE_IDLE_EPS      = 0.01f;  // below this a side is idle and braked
 
 // ---------- Arm feel ----------
 // The arm runs the same profile as the jaws (motion::step), so presets ease in and out
@@ -65,6 +73,11 @@ constexpr float CLAW_MM_S         = 55.0f;   // peak jaw speed
 constexpr float CLAW_ACCEL_MM_S2  = 420.0f;  // ease in/out: reaches peak speed in ~0.13 s
 constexpr float CLAW_TRIGGER_DB   = 0.06f;   // RT travel ignored before it takes over
 constexpr float CLAW_TRIGGER_TAU  = 0.05f;   // RT smoothing: takes thumb shake and ADC noise out
+// Expo on the trigger, like EXPO on the drive sticks. The jaws now open all the way to
+// MIN_US, so without this most of the trigger travel is spent crossing a wide gap nobody
+// is aiming at, and the part that matters -- closing the last few mm onto a block -- gets
+// a sliver of travel. 0 = linear, 1 = fully cubic.
+constexpr float CLAW_TRIGGER_EXPO = 0.6f;
 constexpr float CLAW_RELIEF_MM_S  = 2.5f;    // slow creep when easing a long squeeze
 constexpr uint32_t CLAW_RELIEF_MS = 20000;   // ease the squeeze after a long hold
 

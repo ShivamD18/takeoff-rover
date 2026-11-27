@@ -146,6 +146,9 @@ public:
       trigFilt_ += dt / (CLAW_TRIGGER_TAU + dt) * (trig - trigFilt_);
       float f = (fminf(trigFilt_, 1.0f) - CLAW_TRIGGER_DB) / (1.0f - CLAW_TRIGGER_DB);
       f = fmaxf(0.0f, f);
+      // Expo: most of the travel sweeps the wide-open end quickly, and the squeeze onto
+      // the block gets the fine end of the trigger.
+      f = (1.0f - CLAW_TRIGGER_EXPO) * f + CLAW_TRIGGER_EXPO * f * f * f;
       float closed = claw::gapForGrip(block_);
       target_ = claw::OPEN_GAP + f * (closed - claw::OPEN_GAP);
       trigger_ = true;

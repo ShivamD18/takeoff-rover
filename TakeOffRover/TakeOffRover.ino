@@ -7,7 +7,7 @@
 //
 // Controls (Xbox layout):
 //   Left stick ........ drive (up/down = throttle, left/right = turn)
-//   LB (hold) ......... precision drive (35 % speed)
+//   LB (hold) ......... precision mode: 35 % drive speed, 40 % arm tip speed
 //   Right stick ....... move the claw tip: left/right = reach in/out, up/down = height
 //   A / B / Y / X ..... presets: PICK / CARRY / DROP-over-wall / STOW
 //   RT (analog) ....... squeeze the claw proportionally; let go and it holds the gap
@@ -147,8 +147,10 @@ void loop() {
   if (eRight.rose(dp & DPAD_RIGHT)) { claw_.setBlock(claw::Block::DUPLO); pad->playDualRumble(0, 400, 0x60, 0x00); }
 
   // Arm (manual trim) — frozen on critical battery to protect the servo rail
-  float ax = stick(pad->axisRX());
-  float az = -stick(pad->axisRY());
+  // LB slows the tip as well as the wheels: lining up on a block wants both.
+  float armScale = pad->l1() ? ARM_PRECISION_SCALE : 1.0f;
+  float ax = stick(pad->axisRX()) * armScale;
+  float az = -stick(pad->axisRY()) * armScale;
   if (critBatt) arm_.hold(); else arm_.update(ax, az, dt);
   if (arm_.blocked() && now - lastBuzz > 400) { lastBuzz = now; pad->playDualRumble(0, 60, 0x00, 0x60); }
   claw_.update(dt);

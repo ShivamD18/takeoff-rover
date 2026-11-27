@@ -144,6 +144,29 @@ Order: `p` and check the pins against the real wiring → `a 0.6` (only the left
 `LEFT_INVERT` / `RIGHT_INVERT` in `config.h`; nothing moving, or both sides moving at once, means the wiring
 does not match the pin map.
 
+## Steering
+
+`MIN_EFFECTIVE` is the smallest duty that turns a wheel. Applying it to each side on its own floored the
+**inner** wheel of a turn up to that duty, so it turned when it should barely move and fought the turn:
+
+| Case | Commanded | Per-side floor | Pair floor (now) |
+|---|---|---|---|
+| Full arc | 1.50:1 | 1.33:1 | **1.50:1** |
+| Half arc | 2.33:1 | 1.63:1 | **2.33:1** |
+| Precision arc | 5.00:1 | 1.38:1 | outer drives, inner coasts |
+| Tight and slow | 4.33:1 | 1.88:1 | outer drives, inner coasts |
+
+The floor is now applied to the **pair** (`drive_mix.h`): the larger side gets exactly the duty it always got,
+and the smaller keeps its commanded share. A side whose share falls below `MIN_EFFECTIVE` is **coasted**
+rather than driven, because that duty cannot turn a wheel — energising it would only hold the motor stalled,
+drawing current and making heat. Coasting also scrubs less on the inside of a turn.
+
+Straight-line behaviour is unchanged, and `tools/arm_check` asserts that against the old formula across the
+speed range, so this only ever affects turns. Set `PRESERVE_TURN_RATIO = false` in `config.h` to go back.
+
+Measuring the real `MIN_EFFECTIVE` with `DriveBenchTest` matters here too: the lower it is, the less often the
+inner wheel needs to coast at all.
+
 ## Bring-up
 
 1. **Horns off.** Flash `ServoBenchTest`, Serial Monitor 115200 with Newline, type `h`.
@@ -194,11 +217,7 @@ g++ -std=c++17 -O2 -Wall -ITakeOffRover tools/arm_check.cpp -o /tmp/arm_check &&
   mapping is uncalibrated — but grip width is not trustworthy until step 5 of bring-up is done.
 - Battery type and regulator rating are unconfirmed. Motor pins and `MIN_EFFECTIVE` are unconfirmed but
   `DriveBenchTest` now measures both without flashing the rover firmware.
-- **Turning is weak at low speed.** `MIN_EFFECTIVE` is a floor applied to each side independently, so the
-  inner wheel is floored up to 0.25 duty and turns when it should barely move, fighting the turn. A commanded
-  2:1 ratio comes out as 1.60:1 at full stick and **1.13:1 in precision mode** — exactly where lining up on a
-  block needs it most. Measuring the real `MIN_EFFECTIVE` shrinks this; mapping the pair so the larger side
-  takes the floor and the smaller keeps its commanded ratio would remove it, at the cost of letting the inner
-  wheel stall on a tight turn. Not changed yet: it needs testing on the rover, not a guess.
+- `PRESERVE_TURN_RATIO` (see **Steering**) has only been checked on the PC. Drive it both ways on the rover
+  and keep whichever feels right.
 - The keep-out models the deck, the bracket and the floor only. It doesn't cover the wheels (they sit outside the arm's
   line) or the claw folding back into the arm's own links.
