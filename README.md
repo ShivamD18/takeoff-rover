@@ -6,6 +6,7 @@ assembly exported as `TakeOFF_Rover.stp`, plus one measurement taken on the buil
 | Folder | What it is |
 |---|---|
 | `TakeOffRover/` | Rover firmware: drive, arm IK with deck/bracket keep-out, presets, claw, failsafe |
+| `DriveBenchTest/` | Drive bench test over Serial: per-side drive, direction check, and a creep test that measures `MIN_EFFECTIVE` |
 | `ServoBenchTest/` | Servo bench test and calibration over Serial (`s`/`e`/`c <µs>`, `x`, `t`, `h`) |
 | `tools/arm_check.cpp` | PC test of the arm math: presets, moves between them, pulse ranges |
 | `pages/takeoff-arm-sim.html` | Offline arm simulator, any browser. Same geometry, limits, keep-out and presets as the firmware |
@@ -122,6 +123,27 @@ A command that reverses faster than the jaws can brake is overshot slightly rath
 the command late, but the acceleration limit is never broken. That is deliberate — stopping dead is exactly what the
 driver feels as the claw snatching.
 
+## Wheels
+
+`DriveBenchTest` verifies the L298N wiring without flashing the rover firmware, so the wheels can be
+brought up while the arm is still waiting on its calibration. Serial Monitor at 115200, Newline.
+
+| Command | What it does |
+|---|---|
+| `a <v>` / `b <v>` | One side at a time, `v` = −1.00…1.00. This is how you check the pin map and each side's direction |
+| `d <v>` | Both sides together |
+| `c a` / `c b` | Creep test: ramps that side's duty up from zero until you send any line. **That duty is `MIN_EFFECTIVE`** |
+| `s` / `x` | Brake / coast |
+| `p` | Print the pin map |
+
+**Wheels off the ground for the first run** — a miswired bridge drives at full duty. Every command restarts a
+3 s deadman, so a typo cannot leave the rover driving off the bench.
+
+Order: `p` and check the pins against the real wiring → `a 0.6` (only the left pair, forwards) → `b 0.6` →
+`d 0.6` and `d -0.6` → `c a` and `c b`, take the larger and add ~0.02. A side that runs backwards sets its
+`LEFT_INVERT` / `RIGHT_INVERT` in `config.h`; nothing moving, or both sides moving at once, means the wiring
+does not match the pin map.
+
 ## Bring-up
 
 1. **Horns off.** Flash `ServoBenchTest`, Serial Monitor 115200 with Newline, type `h`.
@@ -170,6 +192,13 @@ g++ -std=c++17 -O2 -Wall -ITakeOffRover tools/arm_check.cpp -o /tmp/arm_check &&
 - The claw's `REF_GAP`, `US_PER_DEG`, `MIN_US` and `MAX_US` are still placeholders, so the *gap in mm* the firmware
   thinks it has is not yet the real one. The motion is smooth either way — the profile works in mm and only the mm-to-µs
   mapping is uncalibrated — but grip width is not trustworthy until step 5 of bring-up is done.
-- Battery type, regulator rating, motor pins and minimum motor PWM are unconfirmed.
+- Battery type and regulator rating are unconfirmed. Motor pins and `MIN_EFFECTIVE` are unconfirmed but
+  `DriveBenchTest` now measures both without flashing the rover firmware.
+- **Turning is weak at low speed.** `MIN_EFFECTIVE` is a floor applied to each side independently, so the
+  inner wheel is floored up to 0.25 duty and turns when it should barely move, fighting the turn. A commanded
+  2:1 ratio comes out as 1.60:1 at full stick and **1.13:1 in precision mode** — exactly where lining up on a
+  block needs it most. Measuring the real `MIN_EFFECTIVE` shrinks this; mapping the pair so the larger side
+  takes the floor and the smaller keeps its commanded ratio would remove it, at the cost of letting the inner
+  wheel stall on a tight turn. Not changed yet: it needs testing on the rover, not a guess.
 - The keep-out models the deck, the bracket and the floor only. It doesn't cover the wheels (they sit outside the arm's
   line) or the claw folding back into the arm's own links.
