@@ -2,6 +2,8 @@
 // Manual trim moves the claw tip in straight lines; presets move in a straight line in
 // joint space. Every commanded pose is checked against the joint limits and the
 // deck/bracket keep-out before it is sent to the servos.
+// The claw runs a speed- and acceleration-limited (trapezoidal) gap profile and takes a
+// proportional command from the right trigger; see the Claw class below.
 #pragma once
 #include <Arduino.h>
 #include "config.h"
@@ -86,29 +88,81 @@ public:
   void begin() {
     pwm::attach(PIN_SERVO_CLAW, CH_CLAW, SERVO_HZ, SERVO_BITS);
     gap_ = target_ = claw::OPEN_GAP;
+    vel_ = 0.0f;
+    lastUs_ = 0;
     write();
   }
-  void open()  { target_ = claw::OPEN_GAP; gripping_ = false; }
-  void grip()  { target_ = claw::gapForGrip(block_, claw::SQUEEZE); gripping_ = true; gripSince_ = millis(); }
+
+  void open()   { target_ = claw::OPEN_GAP; gripping_ = false; slow_ = false; }
+  void grip()   { target_ = claw::gapForGrip(block_, claw::SQUEEZE); gripping_ = true; slow_ = false; gripSince_ = millis(); }
   void toggle() { gripping_ ? open() : grip(); }
-  void setBlock(claw::Block b) { block_ = b; if (gripping_) grip(); }
+  void setBlock(claw::Block b) { block_ = b; if (gripping_ && !trigger_) grip(); }
   claw::Block block() const { return block_; }
+
+  // Analog right trigger in [0, 1]: 0 = fully open, 1 = closed on the current block.
+  // While it is held past the deadband it commands the gap directly and overrides the
+  // RB toggle; let go and the jaws hold the gap they reached, so a block stays gripped
+  // without keeping a finger on the trigger. The motion profile below smooths a shaky
+  // thumb, so the fingers never twitch even if the trigger does.
+  void trim(float trig, float dt) {
+    // Release is tested on the RAW trigger, so letting go latches the gap at once. The
+    // gap it commands while held comes from a one-pole filter, because the trigger is a
+    // 10-bit analog axis under a thumb on a driving robot and its raw value jitters.
+    // Starting the filter from zero on each press also gives the squeeze a soft start.
+    if (trig > CLAW_TRIGGER_DB) {
+      trigFilt_ += dt / (CLAW_TRIGGER_TAU + dt) * (trig - trigFilt_);
+      float f = (fminf(trigFilt_, 1.0f) - CLAW_TRIGGER_DB) / (1.0f - CLAW_TRIGGER_DB);
+      f = fmaxf(0.0f, f);
+      float closed = claw::gapForGrip(block_, claw::SQUEEZE);
+      target_ = claw::OPEN_GAP + f * (closed - claw::OPEN_GAP);
+      trigger_ = true;
+      slow_ = false;
+      gripping_ = f > 0.5f;
+      gripSince_ = millis();
+    } else if (trigger_) {
+      trigger_ = false;
+      trigFilt_ = 0.0f;
+      target_ = gap_;               // latch the gap the driver let go at
+      gripSince_ = millis();
+    } else {
+      trigFilt_ = 0.0f;
+    }
+  }
 
   void update(float dt) {
     // Long hold: back off the squeeze so the SG90 is not stalled hard indefinitely.
-    if (gripping_ && millis() - gripSince_ > CLAW_RELIEF_MS)
-      target_ = claw::gapForGrip(block_, claw::SQUEEZE_RELIEVED);
-    float s = CLAW_MM_S * dt;
-    if (fabsf(target_ - gap_) <= s) gap_ = target_;
-    else gap_ += (target_ > gap_ ? s : -s);
+    // Crept in at CLAW_RELIEF_MM_S, because a step here would twitch the block.
+    if (gripping_ && !trigger_ && !slow_ && millis() - gripSince_ > CLAW_RELIEF_MS) {
+      float relieved = claw::gapForGrip(block_, claw::SQUEEZE_RELIEVED);
+      if (relieved > target_) { target_ = relieved; slow_ = true; }
+    }
+
+    claw::Motion m{gap_, vel_};
+    bool arrived = claw::step(m, target_, dt, slow_ ? CLAW_RELIEF_MM_S : CLAW_MM_S, CLAW_ACCEL_MM_S2);
+    gap_ = m.gap;
+    vel_ = m.vel;
+    if (arrived) slow_ = false;                  // next command runs at full speed again
     write();
   }
 
+  float gap() const { return gap_; }
+  float vel() const { return vel_; }
+  uint16_t us() const { return lastUs_; }
+  bool gripping() const { return gripping_; }
+
 private:
-  float gap_ = claw::OPEN_GAP, target_ = claw::OPEN_GAP;
-  bool gripping_ = false;
+  float gap_ = claw::OPEN_GAP, target_ = claw::OPEN_GAP, vel_ = 0.0f, trigFilt_ = 0.0f;
+  bool gripping_ = false, trigger_ = false, slow_ = false;
   uint32_t gripSince_ = 0;
+  uint16_t lastUs_ = 0;
   claw::Block block_ = claw::Block::LEGO;
+
   // Pulses are never stopped: an SG90 without signal goes limp and drops the block.
-  void write() { pwm::servoUs(PIN_SERVO_CLAW, CH_CLAW, claw::usForGap(gap_)); }
+  // LEDC keeps repeating the last duty on its own, so writing only when the rounded
+  // pulse actually changes keeps the jaws held while stopping the sub-microsecond
+  // dither at the end of a move from buzzing the servo.
+  void write() {
+    uint16_t us = claw::usForGap(gap_);
+    if (us != lastUs_) { pwm::servoUs(PIN_SERVO_CLAW, CH_CLAW, us); lastUs_ = us; }
+  }
 };

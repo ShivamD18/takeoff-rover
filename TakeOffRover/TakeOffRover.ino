@@ -10,7 +10,8 @@
 //   LB (hold) ......... precision drive (35 % speed)
 //   Right stick ....... move the claw tip: left/right = reach in/out, up/down = height
 //   A / B / Y / X ..... presets: PICK / CARRY / DROP-over-wall / STOW
-//   RB ................ claw grip <-> open
+//   RT (analog) ....... squeeze the claw proportionally; let go and it holds the gap
+//   RB ................ claw grip <-> open (latch, for carrying hands-free)
 //   D-pad left/right .. block size LEGO / Duplo (1 short or 1 long rumble)
 //   Short buzz ........ the arm refused a move (limit, deck or bracket in the way)
 //
@@ -108,14 +109,17 @@ void loop() {
 
   if (now - lastLog >= 200) {                    // 5 Hz status for bring-up
     lastLog = now;
-    Serial.printf("tip x %.0f z %.0f mm | t1 %.1f t2 %.1f | us S%u E%u\n", arm_.tipX(), arm_.tipZ(),
-                  arm_.t1(), arm_.t2(), arm::shoulderUs(arm_.t1()), arm::elbowUs(arm_.t2()));
+    Serial.printf("tip x %.0f z %.0f mm | t1 %.1f t2 %.1f | us S%u E%u C%u | gap %.1f mm %c\n",
+                  arm_.tipX(), arm_.tipZ(), arm_.t1(), arm_.t2(),
+                  arm::shoulderUs(arm_.t1()), arm::elbowUs(arm_.t2()), claw_.us(),
+                  claw_.gap(), claw_.gripping() ? 'G' : 'o');
   }
 
   if (pad == nullptr || !pad->isConnected()) {   // failsafe
     drive.emergencyStop();
     arm_.hold();
-    claw_.update(dt);                            // keep gripping whatever it holds
+    claw_.trim(0.0f, dt);                        // release the trigger: latches the gap it
+    claw_.update(dt);                            // holds, and lets the squeeze relief run
     return;
   }
 
@@ -133,8 +137,9 @@ void loop() {
   if (eY.rose(pad->y())) preset(POSE_DROP,  "DROP");
   if (eX.rose(pad->x())) preset(POSE_STOW,  "STOW");
 
-  // Claw
+  // Claw: RB latches open/grip, then RT overrides proportionally while it is held.
   if (eRB.rose(pad->r1())) claw_.toggle();
+  claw_.trim(constrain(pad->throttle() / 1023.0f, 0.0f, 1.0f), dt);
   uint8_t dp = pad->dpad();
   if (eLeft.rose(dp & DPAD_LEFT))   { claw_.setBlock(claw::Block::LEGO);  pad->playDualRumble(0, 120, 0x60, 0x00); }
   if (eRight.rose(dp & DPAD_RIGHT)) { claw_.setBlock(claw::Block::DUPLO); pad->playDualRumble(0, 400, 0x60, 0x00); }

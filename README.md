@@ -64,6 +64,29 @@ Pick (170, 5) · Carry (140, 60) · Drop over wall (200, 55) · Stow (115, 120).
 The Stow preset matches the pose the CAD is drawn in. `tools/arm_check` confirms each preset is ≥17° inside every joint limit
 and that all 12 moves between presets stay clear of the deck and bracket.
 
+## Claw motion
+
+The jaws run a speed- and acceleration-limited profile (`claw::step` in `arm_kinematics.h`, pure math so
+`tools/arm_check` tests the same code the firmware runs), instead of stepping to full speed in one 20 ms tick
+and stopping dead on arrival. Open to a LEGO grip takes **0.68 s** — quicker than the old constant-speed ramp
+and with no snatch at either end. Tunables are in `config.h`:
+
+| Value | Default | What it does |
+|---|---|---|
+| `CLAW_MM_S` | 55 mm/s | Peak jaw speed. An SG90 moves the gap at ~175 mm/s unloaded, so the profile is the limit, not the servo |
+| `CLAW_ACCEL_MM_S2` | 420 mm/s² | Ease in/out; reaches peak speed in ~0.13 s. Lower it for a gentler feel, raise it for a snappier one |
+| `CLAW_TRIGGER_DB` | 0.06 | RT travel ignored before the trigger takes over |
+| `CLAW_TRIGGER_TAU` | 0.05 s | RT smoothing, so thumb shake and ADC noise don't reach the fingers |
+| `CLAW_RELIEF_MM_S` | 2.5 mm/s | Creep rate when easing a long squeeze (was a step, now ~0.26 s) |
+
+**RT squeezes the claw proportionally** and overrides the RB latch while held; let go and the jaws hold the gap they
+reached, so a block stays gripped without keeping a finger on the trigger. RB still toggles full open / full grip for
+carrying hands-free.
+
+A command that reverses faster than the jaws can brake is overshot slightly rather than stopped dead: position follows
+the command late, but the acceleration limit is never broken. That is deliberate — stopping dead is exactly what the
+driver feels as the claw snatching.
+
 ## Bring-up
 
 1. **Horns off.** Flash `ServoBenchTest`, Serial Monitor 115200 with Newline, type `h`.
@@ -106,8 +129,12 @@ g++ -std=c++17 -O2 -Wall -ITakeOffRover tools/arm_check.cpp -o /tmp/arm_check &&
 
 ## Not done yet
 
-- If you change geometry, presets or servo signs in `arm_kinematics.h` / `config.h`, make the same change at the
-  top of the script in both pages (they keep their own copy of the numbers).
+- If you change geometry, presets, servo signs or the claw motion profile in `arm_kinematics.h` / `config.h`, make the
+  same change at the top of the script in both pages (they keep their own copy of the numbers). `CLAW_MM_S` /
+  `CLAW_ACCEL` and the profile block in each page's frame loop must match `claw::step`.
+- The claw's `REF_GAP`, `US_PER_DEG`, `MIN_US` and `MAX_US` are still placeholders, so the *gap in mm* the firmware
+  thinks it has is not yet the real one. The motion is smooth either way — the profile works in mm and only the mm-to-µs
+  mapping is uncalibrated — but grip width is not trustworthy until step 5 of bring-up is done.
 - Battery type, regulator rating, motor pins and minimum motor PWM are unconfirmed.
 - The keep-out models the deck, the bracket and the floor only. It doesn't cover the wheels (they sit outside the arm's
   line) or the claw folding back into the arm's own links.

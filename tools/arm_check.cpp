@@ -6,6 +6,13 @@
 #include "arm_kinematics.h"
 #include "config.h"
 
+static constexpr float DT = 0.02f;   // the firmware's 50 Hz control tick
+
+// Braking distance from the speed limit: the most the jaws may lag a command that
+// reverses faster than they can decelerate. v^2 / (2a), plus a tick of float slack.
+static constexpr float OVERSHOOT_MAX =
+    CLAW_MM_S * CLAW_MM_S / (2.0f * CLAW_ACCEL_MM_S2) + CLAW_MM_S * DT;
+
 static int failures = 0;
 #define CHECK(cond, ...) do { if (!(cond)) { failures++; std::printf("  FAIL: " __VA_ARGS__); std::printf("\n"); } } while (0)
 
@@ -78,6 +85,82 @@ int main() {
   std::printf("Claw: open %u us, LEGO grip %u us, Duplo grip %u us\n", claw::usForGap(claw::OPEN_GAP),
               claw::usForGap(claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE)),
               claw::usForGap(claw::gapForGrip(claw::Block::DUPLO, claw::SQUEEZE)));
+
+  // ---------- Jaw motion profile ----------
+  // Runs the firmware's own claw::step at the 50 Hz control rate and measures what the
+  // fingers do: how long a move takes, the peak speed, the worst jerk (change of
+  // acceleration between ticks) and any overshoot past the target.
+  std::printf("Jaw moves at %.0f Hz (limit %.0f mm/s, accel %.0f mm/s^2):\n", 1.0f / DT, CLAW_MM_S, CLAW_ACCEL_MM_S2);
+  struct Move { const char *name; float from, to; } moves[] = {
+    {"open -> LEGO grip",  claw::OPEN_GAP, claw::gapForGrip(claw::Block::LEGO,  claw::SQUEEZE)},
+    {"open -> Duplo grip", claw::OPEN_GAP, claw::gapForGrip(claw::Block::DUPLO, claw::SQUEEZE)},
+    {"LEGO grip -> open",  claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE), claw::OPEN_GAP},
+    {"1 mm nudge",         claw::OPEN_GAP, claw::OPEN_GAP - 1.0f},
+  };
+  for (const Move &mv : moves) {
+    claw::Motion m; m.gap = mv.from; m.vel = 0.0f;
+    float vPeak = 0, aPrev = 0, jerkMax = 0, overshoot = 0, vLast = 0;
+    int ticks = 0;
+    for (; ticks < 2000; ticks++) {
+      float vBefore = m.vel;
+      bool done = claw::step(m, mv.to, DT, CLAW_MM_S, CLAW_ACCEL_MM_S2);
+      float a = (m.vel - vBefore) / DT;
+      if (ticks > 0) jerkMax = std::fmax(jerkMax, std::fabs(a - aPrev));
+      aPrev = a;
+      vPeak = std::fmax(vPeak, std::fabs(m.vel));
+      float past = (mv.to > mv.from) ? m.gap - mv.to : mv.to - m.gap;
+      overshoot = std::fmax(overshoot, past);
+      vLast = m.vel;
+      if (done) { ticks++; break; }
+    }
+    std::printf("  %-18s %5.1f -> %5.1f mm  %5.2f s  peak %5.1f mm/s  max jerk %7.0f mm/s^3  overshoot %.4f mm\n",
+                mv.name, mv.from, mv.to, ticks * DT, vPeak, jerkMax, overshoot);
+    CHECK(ticks < 2000, "%s never reached the target", mv.name);
+    CHECK(overshoot <= 1e-3f, "%s overshoots by %.3f mm", mv.name, overshoot);
+    CHECK(std::fabs(vLast) < 1e-3f, "%s ends at %.2f mm/s instead of stopped", mv.name, vLast);
+    CHECK(vPeak <= CLAW_MM_S + 1e-3f, "%s exceeds the speed limit (%.1f mm/s)", mv.name, vPeak);
+    // One tick of acceleration applied or removed is the most the profile may ever step.
+    CHECK(jerkMax <= CLAW_ACCEL_MM_S2 / DT + 1.0f, "%s jerk %.0f exceeds one accel step", mv.name, jerkMax);
+  }
+
+  // A shaky trigger thumb must not shake the fingers: feed a noisy command and check the
+  // gap stays inside the acceleration limit and tracks the average, not the noise.
+  {
+    claw::Motion m; m.gap = claw::OPEN_GAP; m.vel = 0.0f;
+    float closed = claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE);
+    float aMax = 0, vPrev = 0;
+    unsigned seed = 12345;
+    for (int i = 0; i < 300; i++) {
+      seed = seed * 1103515245u + 12345u;
+      float noise = ((seed >> 16) % 1000) / 1000.0f - 0.5f;      // +/- 0.5 of the trigger
+      float f = std::fmin(1.0f, std::fmax(0.0f, 0.5f + 0.6f * noise));
+      float target = claw::OPEN_GAP + f * (closed - claw::OPEN_GAP);
+      claw::step(m, target, DT, CLAW_MM_S, CLAW_ACCEL_MM_S2);
+      aMax = std::fmax(aMax, std::fabs(m.vel - vPrev) / DT);
+      vPrev = m.vel;
+      // A command that reverses faster than the jaws can brake is overshot by at most
+      // the stopping distance from the speed limit; past that the jaws are not tracking.
+      CHECK(m.gap >= closed - OVERSHOOT_MAX && m.gap <= claw::OPEN_GAP + OVERSHOOT_MAX,
+            "noisy trigger drove the gap to %.2f mm", m.gap);
+    }
+    std::printf("  noisy trigger      peak acceleration %.0f mm/s^2 (limit %.0f), overshoot allowance %.2f mm\n",
+                aMax, CLAW_ACCEL_MM_S2, OVERSHOOT_MAX);
+    CHECK(aMax <= CLAW_ACCEL_MM_S2 + 1.0f, "noisy trigger broke the accel limit (%.0f)", aMax);
+  }
+
+  // Relief creep after a long hold must be gentle and must not open the jaws far.
+  {
+    claw::Motion m;
+    m.gap = claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE);
+    m.vel = 0.0f;
+    float relieved = claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE_RELIEVED);
+    int ticks = 0;
+    while (!claw::step(m, relieved, DT, CLAW_RELIEF_MM_S, CLAW_ACCEL_MM_S2) && ticks < 2000) ticks++;
+    std::printf("  squeeze relief     %.1f -> %.1f mm in %.2f s at <= %.1f mm/s\n",
+                claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE), relieved, ticks * DT, CLAW_RELIEF_MM_S);
+    CHECK(ticks > 2, "relief creep lands in %d ticks: too abrupt to be a creep", ticks);
+    CHECK(relieved - claw::gapForGrip(claw::Block::LEGO, claw::SQUEEZE) < 1.0f, "relief opens the jaws more than 1 mm");
+  }
 
   std::printf(failures ? "\n%d check(s) FAILED\n" : "\nAll checks passed\n", failures);
   return failures ? 1 : 0;

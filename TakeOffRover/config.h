@@ -47,8 +47,19 @@ constexpr float MIN_EFFECTIVE   = 0.25f;    // CAL: smallest duty that turns the
 // ---------- Arm feel ----------
 constexpr float ARM_TRIM_MM_S    = 120.0f;  // right-stick tip speed
 constexpr float ARM_PRESET_DEG_S = 90.0f;   // fastest joint during a preset move
-constexpr float CLAW_MM_S        = 40.0f;   // jaw closing rate
-constexpr uint32_t CLAW_RELIEF_MS = 20000;  // ease the squeeze after a long hold
+
+// ---------- Claw feel ----------
+// The jaws run a speed- and acceleration-limited profile, so they ease in and out of
+// every move instead of stepping to full speed in one 20 ms tick. An SG90 moves the gap
+// at roughly 175 mm/s unloaded, so the peak below is the profile's limit, not the
+// servo's: the fingers actually follow the ramp. Open -> LEGO grip takes ~0.70 s,
+// quicker than the old constant-speed ramp and without the snatch at either end.
+constexpr float CLAW_MM_S         = 55.0f;   // peak jaw speed
+constexpr float CLAW_ACCEL_MM_S2  = 420.0f;  // ease in/out: reaches peak speed in ~0.13 s
+constexpr float CLAW_TRIGGER_DB   = 0.06f;   // RT travel ignored before it takes over
+constexpr float CLAW_TRIGGER_TAU  = 0.05f;   // RT smoothing: takes thumb shake and ADC noise out
+constexpr float CLAW_RELIEF_MM_S  = 2.5f;    // slow creep when easing a long squeeze
+constexpr uint32_t CLAW_RELIEF_MS = 20000;   // ease the squeeze after a long hold
 
 // ---------- Presets: claw tip (x ahead of the shoulder axis, z = finger bottom above floor), mm ----------
 // Checked by tools/arm_check.cpp: inside the joint limits with >= 17 deg to spare, clear of the

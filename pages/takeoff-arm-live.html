@@ -241,11 +241,11 @@ code { font-family: var(--font-data); font-size: 12.5px; }
   const OPEN_GAP = 45, SQUEEZE = 1.5;
   const BLOCKS = { LEGO: { w: 15.8, h: 11.4, name: "LEGO" }, DUPLO: { w: 31.7, h: 19.2, name: "Duplo" } };
   const PRESETS = { pick: [170, 5], carry: [140, 60], drop: [200, 55], stow: [115, 120] };
-  const PRESET_DEG_S = 90, CLAW_MM_S = 40;
+  const PRESET_DEG_S = 90, CLAW_MM_S = 55, CLAW_ACCEL = 420;
   const WALL = { x: 140, w: 5, h: 25.4 };   // scene prop: a 1-inch safe-zone wall
   const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI;
 
-  const S = { t1: 0, t2: 0, gap: OPEN_GAP, gapTarget: OPEN_GAP, gripping: false, block: "LEGO",
+  const S = { t1: 0, t2: 0, gap: OPEN_GAP, gapTarget: OPEN_GAP, gapVel: 0, gripping: false, block: "LEGO",
               goal: null, reason: null, blockPos: { x: 170, z: 0 }, held: false, heldDz: 0 };
 
   function jointReason(t1, t2) {
@@ -563,20 +563,26 @@ code { font-family: var(--font-data); font-size: 12.5px; }
     if (!LINK.writer) return;
     try { await LINK.writer.write(line + "\n"); } catch (e) { logLine("write failed: " + e.message); }
   }
-  let lastSent = { s: 0, e: 0, c: 0 }, sendTimer = 0, resyncTimer = 0;
+  let lastSent = { s: 0, e: 0, c: 0 }, sendTimer = 0, resyncTimer = 0, lastSendT = 0;
   function syncServos(now) {
-    if (!LINK.connected || now - sendTimer < 50) return;   // 20 Hz max
+    // 50 Hz: a servo takes a new command once per 20 ms PWM frame, so this is as fine as
+    // the hardware can resolve. At 20 Hz a smooth ramp reached the servo as ~90 us steps,
+    // which the jaws showed as a staircase. Three 9-byte commands at 50 Hz is ~14 kbit/s,
+    // well inside 115200 alongside the board's telemetry.
+    if (!LINK.connected || now - sendTimer < 20) return;
     sendTimer = now;
     // Opening the port can reboot the ESP32, which then misses the first commands and sits
     // limp. If its telemetry disagrees with what was sent, send all three again (2x a second max).
-    if (now - (LINK.lastT || 0) < 500 && now - resyncTimer > 500 &&
+    // Only once nothing has been sent for 300 ms: mid-move the board's 20 Hz telemetry is
+    // legitimately a few commands behind, which is not a disagreement worth resending for.
+    if (now - (LINK.lastT || 0) < 500 && now - resyncTimer > 500 && now - lastSendT > 300 &&
         ["s", "e", "c"].some(k => Math.abs(LINK.last[k] - lastSent[k]) > 1)) {
       resyncTimer = now;
       lastSent = { s: 0, e: 0, c: 0 };
     }
     const want = RAW.on ? { s: RAW.s, e: RAW.e, c: RAW.c }
                         : { s: Math.round(shUs(S.t1)), e: Math.round(elUs(S.t2)), c: Math.round(clUs(S.gap)) };
-    for (const k of ["s", "e", "c"]) if (!(RAW.on && !RAW.armed[k])) if (Math.abs(want[k] - lastSent[k]) >= 2) { send(`${k} ${want[k]}q`); lastSent[k] = want[k]; }
+    for (const k of ["s", "e", "c"]) if (!(RAW.on && !RAW.armed[k])) if (Math.abs(want[k] - lastSent[k]) >= 1) { send(`${k} ${want[k]}q`); lastSent[k] = want[k]; lastSendT = now; }
   }
   function handleLine(line) {
     const p = line.trim().split(/\s+/);
@@ -674,8 +680,21 @@ code { font-family: var(--font-data); font-size: 12.5px; }
       S.t1 = ap(S.t1, S.goal[0]); S.t2 = ap(S.t2, S.goal[1]);
       if (S.t1 === S.goal[0] && S.t2 === S.goal[1]) S.goal = null;
     }
-    const s = CLAW_MM_S * dt;
-    S.gap = Math.abs(S.gapTarget - S.gap) <= s ? S.gapTarget : S.gap + Math.sign(S.gapTarget - S.gap) * s;
+    // Jaw motion: the same speed- and acceleration-limited profile the firmware runs
+    // (claw::step in TakeOffRover/arm_kinematics.h). Change one, change the other.
+    if (dt > 0) {
+      const d = S.gapTarget - S.gap, dist = Math.abs(d), dv = CLAW_ACCEL * dt;
+      if (dist < 1e-3 && Math.abs(S.gapVel) < 1e-3) { S.gap = S.gapTarget; S.gapVel = 0; }
+      else {
+        const vStop = 0.5 * dv * (Math.sqrt(1 + 8 * dist / (dv * dt)) - 1);
+        const vWant = Math.sign(d) * Math.min(CLAW_MM_S, vStop);
+        S.gapVel = S.gapVel < vWant ? Math.min(vWant, S.gapVel + dv) : Math.max(vWant, S.gapVel - dv);
+        S.gap += S.gapVel * dt;
+        if (((d > 0 && S.gap >= S.gapTarget) || (d < 0 && S.gap <= S.gapTarget)) && Math.abs(S.gapVel) <= dv) {
+          S.gap = S.gapTarget; S.gapVel = 0;
+        }
+      }
+    }
     // pick up: jaws closed onto the block while the tip is at block height
     if (S.gripping && !S.held) {
       const { tip } = fk(S.t1, S.t2), b = BLOCKS[S.block];

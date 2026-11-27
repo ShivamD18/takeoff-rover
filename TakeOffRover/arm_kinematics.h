@@ -156,8 +156,52 @@ constexpr float SQUEEZE  = 1.5f;    // mm past contact, taken up by the rubber p
 constexpr float SQUEEZE_RELIEVED = 0.8f;
 
 inline float gapForGrip(Block b, float squeeze) { return (b == Block::LEGO ? LEGO_W : DUPLO_W) - squeeze; }
+
+// ---------- Jaw motion profile ----------
+// Speed- and acceleration-limited (trapezoidal) gap control. Pure math, so
+// tools/arm_check.cpp tests the same code the firmware runs. Call step() once per
+// control tick: the gap never changes speed by more than accel*dt, and it decelerates
+// into the target rather than stopping dead, which is what the fingers feel as smooth.
+// Tracking a target that keeps moving (the analog trigger) works the same way.
+struct Motion { float gap = 0.0f, vel = 0.0f; };
+
+inline bool atRest(const Motion &m, float target) {
+  return fabsf(target - m.gap) < 1e-3f && fabsf(m.vel) < 1e-3f;
+}
+
+// Returns true once the jaws are parked on the target with zero speed.
+inline bool step(Motion &m, float target, float dt, float vLimit, float accel) {
+  if (atRest(m, target)) { m.gap = target; m.vel = 0.0f; return true; }
+  float d = target - m.gap;
+  float dist = fabsf(d);
+  float dv = accel * dt;
+
+  // Largest speed the jaws could still stop from inside the distance left. The continuous
+  // answer, sqrt(2*accel*dist), is slightly too fast for a discrete tick: braking by dv
+  // per tick from v actually covers v*v/(2*accel) + v*dt/2. Solving that for v is what
+  // lets the jaws arrive already at zero speed, instead of needing to be stopped dead on
+  // the tick they land -- which is the jolt a human feels as the claw snatching.
+  float vStop = 0.5f * dv * (sqrtf(1.0f + 8.0f * dist / (dv * dt)) - 1.0f);
+  float vWant = (d > 0.0f ? 1.0f : -1.0f) * fminf(vLimit, vStop);
+
+  m.vel = (m.vel < vWant) ? fminf(vWant, m.vel + dv) : fmaxf(vWant, m.vel - dv);
+  m.gap += m.vel * dt;
+
+  // Landing. Snapping the last float residue away is free only while the speed left is
+  // inside one tick of braking; above that -- which means the target itself jumped, as a
+  // reversing trigger does -- the jaws keep decelerating and overshoot slightly rather
+  // than taking an unbounded stop. Position follows the command late; acceleration is
+  // never broken.
+  if ((d > 0.0f && m.gap >= target) || (d < 0.0f && m.gap <= target)) {
+    if (fabsf(m.vel) <= dv) { m.gap = target; m.vel = 0.0f; return true; }
+  }
+  return false;
+}
+// Rounded, not truncated: a half-microsecond bias here is a 0.015 mm step in the gap,
+// but truncation also makes the pulse change one tick early on the way down and late on
+// the way up, which the SG90 shows as a tiny hitch mid-move.
 inline uint16_t usForGap(float gapMm) {
   float us = REF_US + OPEN_SIGN * (gapMm - REF_GAP) / GAP_PER_DEG * US_PER_DEG;
-  return (uint16_t)fmaxf(MIN_US, fminf(MAX_US, us));
+  return (uint16_t)lroundf(fmaxf(MIN_US, fminf(MAX_US, us)));
 }
 } // namespace claw
