@@ -16,6 +16,20 @@ assembly exported as `TakeOFF_Rover.stp`, plus one measurement taken on the buil
 Both sketches compile with **esp32_bluepad32 4.1.0**, board **ESP32 Dev Module**. `ServoBenchTest` is running on the
 rover; `TakeOffRover` has not been flashed yet (it waits on the arm calibration below).
 
+## Web pages
+
+Open either page straight from the folder (double-click it, no server needed).
+
+**Simulator** (`pages/takeoff-arm-sim.html`), shown at the Pick preset. Drag the claw tip or press a preset; the
+joint-space chart shows every pose the firmware allows (red cells would hit the deck, bracket or floor).
+
+![Arm simulator at the Pick preset](docs/images/sim-pick.png)
+
+**Live page** (`pages/takeoff-arm-live.html`), shown with raw calibration mode ticked before connecting, so every servo
+is still limp. Connect to ESP32 talks to `ServoBenchTest` over USB.
+
+![Live page in raw calibration mode](docs/images/live-raw.png)
+
 ## Wiring
 
 | Part | GPIO |
