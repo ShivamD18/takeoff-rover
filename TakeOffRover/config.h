@@ -29,9 +29,25 @@ constexpr bool CLAW_ENABLED = true;
 // and arm::ELBOW to hold measured numbers first, or the arm goes somewhere arbitrary.
 constexpr bool ARM_RAW_MODE = true;
 
-// Jog feel, and how far a preset may travel per second, in microseconds.
-constexpr float ARM_RAW_US_S  = 320.0f;
-constexpr float ARM_RAW_ACCEL = 1400.0f;
+// Right stick mapping. Measured on the rover 2026-11-28: the RIGHT stick does NOT come
+// through swapped, even though the left one does, so this is its own flag rather than
+// reusing STICK_SWAP_XY. Up/down works the shoulder, left/right the elbow.
+constexpr bool ARM_STICK_SWAP_XY   = false;
+constexpr bool ARM_SHOULDER_INVERT = false;   // flip if up on the stick lowers the arm
+constexpr bool ARM_ELBOW_INVERT    = false;
+
+// Jog feel, in microseconds.
+constexpr float ARM_RAW_US_S  = 420.0f;   // full-stick jog rate
+constexpr float ARM_RAW_ACCEL = 2200.0f;  // ramps to full rate in ~0.2 s
+constexpr float ARM_RAW_EXPO  = 0.65f;    // fine near centre, quick at the edges
+// Smoothing on the right stick, same idea as the claw trigger. The sticks are 10-bit
+// axes under a thumb on a driving robot and the raw value jitters, which an MG996R shows
+// as a joint that will not sit still. This is the one that actually cleans up jogging.
+constexpr float ARM_STICK_TAU = 0.07f;
+// Headroom the profile gets over the jog rate. Measured effect is small - tracking lag is
+// about 36 us either way - so this is just margin, not the thing that makes jogging
+// smooth. The expo and the filter above do that.
+constexpr float ARM_RAW_TRACK = 1.5f;
 
 // Raw presets on A / B / Y / X, as (shoulder, elbow) pulses. Jog the arm where you want
 // it, read the pair off the 5 Hz serial log, and paste it in here. 1500/1500 is mid

@@ -145,8 +145,12 @@ public:
 
   void update(float dt) {
     if (!live_) return;
-    motion::step(ms_, tgtS_, dt, ARM_RAW_US_S, ARM_RAW_ACCEL);
-    motion::step(me_, tgtE_, dt, ARM_RAW_US_S, ARM_RAW_ACCEL);
+    // The profile is given headroom over the jog rate so it tracks the stick instead of
+    // sitting pinned at its own speed limit, which is what made jogging feel laggy and
+    // leave the arm drifting on after the stick was released.
+    const float track = ARM_RAW_US_S * ARM_RAW_TRACK;
+    motion::step(ms_, tgtS_, dt, track, ARM_RAW_ACCEL);
+    motion::step(me_, tgtE_, dt, track, ARM_RAW_ACCEL);
     write();
   }
 

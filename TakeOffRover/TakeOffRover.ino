@@ -112,14 +112,25 @@ void readSticks(float &throttle, float &turn) {
   if (TURN_INVERT) turn = -turn;
 }
 
-// Right stick -> claw tip reach and height, through the same swap: horizontal stick
-// moves the tip in and out, vertical moves it up and down.
-// UNTESTED. ARM_ENABLED is false until the arm is calibrated, so this mirrors the left
-// stick's mapping and wants checking the first time the arm runs.
-void readArmSticks(float &ax, float &az) {
+// Right stick -> ax (horizontal: elbow, or tip reach) and az (vertical: shoulder, or tip
+// height). Has its own swap flag because this controller swaps the left stick's axes but
+// not the right one's.
+// Expo on top of the drive shaping: the first part of the travel is much finer, which is
+// what makes a servo jog feel controllable rather than twitchy.
+void readArmSticks(float &ax, float &az, float dt) {
+  static float fx = 0.0f, fz = 0.0f;
   float rx = stick(pad->axisRX()), ry = stick(pad->axisRY());
-  ax = STICK_SWAP_XY ? ry : rx;        // horizontal stick = reach
-  az = STICK_SWAP_XY ? rx : -ry;       // vertical stick = height
+  float cx = ARM_STICK_SWAP_XY ? ry : rx;
+  float cz = ARM_STICK_SWAP_XY ? rx : -ry;
+  cx = (1.0f - ARM_RAW_EXPO) * cx + ARM_RAW_EXPO * cx * cx * cx;
+  cz = (1.0f - ARM_RAW_EXPO) * cz + ARM_RAW_EXPO * cz * cz * cz;
+  // One-pole filter on the shaped command. Returning to centre is not filtered, so
+  // letting go of the stick stops the joint at once rather than easing out of the move.
+  float k = dt / (ARM_STICK_TAU + dt);
+  fx = (cx == 0.0f) ? 0.0f : fx + k * (cx - fx);
+  fz = (cz == 0.0f) ? 0.0f : fz + k * (cz - fz);
+  ax = ARM_ELBOW_INVERT ? -fx : fx;
+  az = ARM_SHOULDER_INVERT ? -fz : fz;
 }
 
 struct Edge { bool prev = false; bool rose(bool now) { bool r = now && !prev; prev = now; return r; } };
@@ -246,7 +257,7 @@ void loop() {
   // LB slows the tip as well as the wheels: lining up on a block wants both.
   float armScale = pad->l1() ? ARM_PRECISION_SCALE : 1.0f;
   float ax, az;
-  readArmSticks(ax, az);
+  readArmSticks(ax, az, dt);
   ax *= armScale;
   az *= armScale;
   if (ARM_RAW_MODE) {
