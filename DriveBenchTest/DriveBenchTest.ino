@@ -25,8 +25,9 @@
 
 // Must match TakeOffRover/config.h. Duplicated because the Arduino IDE compiles only the
 // sketch folder, the same reason ServoBenchTest carries its own copy of the servo pins.
-constexpr uint8_t PIN_ENA = 25, PIN_IN1 = 26, PIN_IN2 = 27;   // left pair
-constexpr uint8_t PIN_ENB = 33, PIN_IN3 = 32, PIN_IN4 = 13;   // right pair
+// From the working TakeoffBot sketch, 2026-11-28: the wiring actually on the rover.
+constexpr uint8_t PIN_ENA = 27, PIN_IN1 = 32, PIN_IN2 = 33;   // left pair
+constexpr uint8_t PIN_ENB = 14, PIN_IN3 = 25, PIN_IN4 = 26;   // right pair
 constexpr uint32_t MOTOR_PWM_HZ = 1000;
 constexpr uint8_t  MOTOR_PWM_BITS = 10;
 constexpr uint8_t  CH_LEFT = 0, CH_RIGHT = 1;

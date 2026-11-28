@@ -8,13 +8,17 @@ constexpr uint8_t PIN_SERVO_ELBOW    = 18;  // MG996R driving the 30 mm crank ->
 constexpr uint8_t PIN_SERVO_CLAW     = 21;  // SG90 on the gripper's spur gear
 
 // ---------- L298N (left pair on bridge A, right pair on bridge B) ----------
-// Not re-checked since the servo rewire: confirm against the wiring before driving.
-constexpr uint8_t PIN_ENA = 25;  // left speed PWM  (ENA jumper removed, 10k pull-down)
-constexpr uint8_t PIN_IN1 = 26;
-constexpr uint8_t PIN_IN2 = 27;
-constexpr uint8_t PIN_ENB = 33;  // right speed PWM (ENB jumper removed, 10k pull-down)
-constexpr uint8_t PIN_IN3 = 32;
-constexpr uint8_t PIN_IN4 = 13;
+// Taken from the working TakeoffBot sketch on 2026-11-28, which is the wiring actually on
+// the rover. The previous map here (ENA 25, IN1 26, IN2 27, ENB 33, IN3 32, IN4 13) was
+// never re-checked after the rewire and was wrong in a way that could not work: it drove
+// GPIO13, which is not connected to anything, and never drove GPIO14, the right enable.
+// With neither enable asserted the bridge stays disabled and the motors cannot turn.
+constexpr uint8_t PIN_ENA = 27;  // left speed PWM
+constexpr uint8_t PIN_IN1 = 32;
+constexpr uint8_t PIN_IN2 = 33;
+constexpr uint8_t PIN_ENB = 14;  // right speed PWM
+constexpr uint8_t PIN_IN3 = 25;
+constexpr uint8_t PIN_IN4 = 26;
 
 // ---------- Battery sense (optional) ----------
 // Leave false unless the 100k/33k divider is fitted: a floating GPIO34 reads near 0 V,

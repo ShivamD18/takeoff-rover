@@ -39,8 +39,8 @@ is still limp. Connect to ESP32 talks to `ServoBenchTest` over USB.
 | Shoulder MG996R (horn carries the 120 mm upper arm) | **19** |
 | Elbow MG996R (horn carries the 30 mm crank → push rod → forearm) | **18** |
 | Claw SG90 | **21** |
-| L298N ENA / IN1 / IN2 | 25 / 26 / 27 (not re-checked since the rewire) |
-| L298N ENB / IN3 / IN4 | 33 / 32 / 13 (not re-checked since the rewire) |
+| L298N ENA / IN1 / IN2 | **27 / 32 / 33** |
+| L298N ENB / IN3 / IN4 | **14 / 25 / 26** |
 | Battery sense (only with the divider fitted; set `HAVE_VBAT_SENSE`) | 34 |
 
 ## Arm geometry
@@ -232,8 +232,12 @@ g++ -std=c++17 -O2 -Wall -ITakeOffRover tools/arm_check.cpp -o /tmp/arm_check &&
 - The claw's `REF_GAP`, `US_PER_DEG`, `MIN_US` and `MAX_US` are still placeholders, so the *gap in mm* the firmware
   thinks it has is not yet the real one. The motion is smooth either way — the profile works in mm and only the mm-to-µs
   mapping is uncalibrated — but grip width is not trustworthy until step 5 of bring-up is done.
-- Battery type and regulator rating are unconfirmed. Motor pins and `MIN_EFFECTIVE` are unconfirmed but
-  `DriveBenchTest` now measures both without flashing the rover firmware.
+- Battery type and regulator rating are unconfirmed. `MIN_EFFECTIVE` is unconfirmed; `DriveBenchTest`'s creep
+  test measures it without flashing the rover firmware.
+- The motor pins were corrected on 2026-11-28 from the `TakeoffBot` sketch, which is the wiring on the rover.
+  The old map could not have worked: it drove GPIO13, which is connected to nothing, and never drove GPIO14,
+  the right enable, so the bridge stayed disabled whatever was commanded. Which side is "left" still needs the
+  direction test, and `LEFT_INVERT` / `RIGHT_INVERT` with it.
 - `PRESERVE_TURN_RATIO` (see **Steering**) has only been checked on the PC. Drive it both ways on the rover
   and keep whichever feels right.
 - The keep-out models the deck, the bracket and the floor only. It doesn't cover the wheels (they sit outside the arm's
