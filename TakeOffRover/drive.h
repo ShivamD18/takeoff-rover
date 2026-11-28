@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include "config.h"
 #include "pwm.h"
+#include "drive_mix.h"
 
 class Drive {
 public:
@@ -21,21 +22,21 @@ public:
 
   // throttle, turn in [-1, 1]; scale caps top speed (precision mode, low battery).
   void command(float throttle, float turn, float scale, float dt) {
-    float l = throttle + turn * TURN_GAIN;
-    float r = throttle - turn * TURN_GAIN;
-    float m = fmaxf(1.0f, fmaxf(fabsf(l), fabsf(r)));   // keep the turn ratio when saturated
-    tgtL_ = l / m * scale;
-    tgtR_ = r / m * scale;
+    drivemix::mix(throttle, turn, TURN_GAIN, scale, tgtL_, tgtR_);
     curL_ = ramp(curL_, tgtL_, dt);
     curR_ = ramp(curR_, tgtR_, dt);
-    bool idle = fabsf(tgtL_) < 0.01f && fabsf(tgtR_) < 0.01f;
+    bool idle = fabsf(tgtL_) < DRIVE_IDLE_EPS && fabsf(tgtR_) < DRIVE_IDLE_EPS;
     if (idle && fabsf(curL_) < 0.05f && fabsf(curR_) < 0.05f) {
       curL_ = curR_ = 0.0f;
       brake();                       // hold position: no rolling out of a parking zone
       return;
     }
-    side(PIN_IN1, PIN_IN2, PIN_ENA, CH_LEFT,  LEFT_INVERT  ? -curL_ : curL_);
-    side(PIN_IN3, PIN_IN4, PIN_ENB, CH_RIGHT, RIGHT_INVERT ? -curR_ : curR_);
+    drivemix::Out ol, orr;
+    drivemix::duties(LEFT_INVERT  ? -curL_ : curL_,
+                     RIGHT_INVERT ? -curR_ : curR_,
+                     MIN_EFFECTIVE, PRESERVE_TURN_RATIO, DRIVE_IDLE_EPS, ol, orr);
+    apply(PIN_IN1, PIN_IN2, PIN_ENA, CH_LEFT,  ol);
+    apply(PIN_IN3, PIN_IN4, PIN_ENB, CH_RIGHT, orr);
   }
 
   void brake() {
@@ -65,17 +66,21 @@ private:
     return fmaxf(tgt, cur - step);
   }
 
-  static void side(uint8_t inA, uint8_t inB, uint8_t en, uint8_t ch, float v) {
-    float mag = fabsf(v);
-    if (mag < 0.01f) {               // this side idle while the other turns: brake it
-      digitalWrite(inA, LOW); digitalWrite(inB, LOW);
-      pwm::write(en, ch, maxDuty());
-      return;
+  // Put one bridge into the state drive_mix.h worked out.
+  static void apply(uint8_t inA, uint8_t inB, uint8_t en, uint8_t ch, const drivemix::Out &o) {
+    switch (o.mode) {
+      case drivemix::Mode::Brake:    // idle side: hold it, so it anchors a pivot turn
+        digitalWrite(inA, LOW); digitalWrite(inB, LOW);
+        pwm::write(en, ch, maxDuty());
+        return;
+      case drivemix::Mode::Coast:    // commanded too low to turn a wheel: freewheel, no
+        pwm::write(en, ch, 0);       // stall current and less scrub on the inside of a turn
+        return;
+      case drivemix::Mode::Drive:
+        digitalWrite(inA, o.forward ? HIGH : LOW);
+        digitalWrite(inB, o.forward ? LOW : HIGH);
+        pwm::write(en, ch, (uint32_t)(o.duty * maxDuty()));
+        return;
     }
-    // Map (0,1] onto [MIN_EFFECTIVE,1] so small stick moves still turn the wheels.
-    float duty = MIN_EFFECTIVE + (1.0f - MIN_EFFECTIVE) * fminf(mag, 1.0f);
-    digitalWrite(inA, v > 0 ? HIGH : LOW);
-    digitalWrite(inB, v > 0 ? LOW : HIGH);
-    pwm::write(en, ch, (uint32_t)(duty * maxDuty()));
   }
 };
