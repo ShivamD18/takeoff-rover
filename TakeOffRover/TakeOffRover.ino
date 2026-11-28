@@ -45,7 +45,19 @@ void updateBattery() {
 
 // ---------- Controller connection ----------
 void onConnected(ControllerPtr c) {
-  if (pad != nullptr || !c->isGamepad()) { c->disconnect(); return; }  // one controller only
+  // Say why before hanging up on anything. Silently disconnecting here is
+  // indistinguishable from a pairing fault at the bench: the light comes on, goes off,
+  // and the log blames Bluetooth for what was actually this function's doing.
+  if (pad != nullptr) {
+    Serial.println("Second controller refused: one is already connected");
+    c->disconnect();
+    return;
+  }
+  if (!c->isGamepad()) {
+    Serial.printf("Refused '%s': Bluepad32 does not report it as a gamepad\n", c->getModelName().c_str());
+    c->disconnect();
+    return;
+  }
   pad = c;
   BP32.enableNewBluetoothConnections(false);   // no other controller can pair mid-match
   c->playDualRumble(0, 250, 0x80, 0x40);
@@ -93,6 +105,10 @@ void setup() {
   else Serial.println("ARM DISABLED (config.h ARM_ENABLED=false): drive only, servos stay limp");
   BP32.setup(&onConnected, &onDisconnected);
   BP32.enableVirtualDevice(false);
+  if (FORGET_BT_KEYS) {
+    BP32.forgetBluetoothKeys();
+    Serial.println("Bluetooth keys wiped. Pair the controller now, then set FORGET_BT_KEYS=false and reflash.");
+  }
   Serial.println("TakeOFF Rover ready - turn on the Xbox controller (hold pair button the first time)");
 }
 

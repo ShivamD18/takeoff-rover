@@ -14,6 +14,15 @@
 // false and the arm is fitted.
 constexpr bool ARM_ENABLED = false;
 
+// ---------- Bluetooth pairing ----------
+// TRUE wipes every stored controller pairing at boot. Bluepad32 keeps pairing keys in
+// flash, and a stale set makes a controller connect and drop straight back out, which
+// looks like the Xbox light coming on and going off again with
+// "could not find device for address ..." on the serial log.
+// Set true, flash, pair the controller, then set it back to false and reflash - otherwise
+// the keys are wiped on every boot and the controller has to be re-paired each time.
+constexpr bool FORGET_BT_KEYS = false;
+
 // ---------- Servos (signal only; power from the 5 V servo regulator, common ground) ----------
 constexpr uint8_t PIN_SERVO_SHOULDER = 19;  // MG996R whose horn carries the 120 mm upper arm
 constexpr uint8_t PIN_SERVO_ELBOW    = 18;  // MG996R driving the 30 mm crank -> push rod -> forearm
