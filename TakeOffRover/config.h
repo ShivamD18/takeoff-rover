@@ -23,6 +23,16 @@ constexpr bool ARM_ENABLED = false;
 // the keys are wiped on every boot and the controller has to be re-paired each time.
 constexpr bool FORGET_BT_KEYS = false;
 
+// ---------- Status LED ----------
+// Says what the radio is doing with no laptop attached, which is the only way to tell on
+// the field. GPIO2 is the blue onboard LED on most ESP32 dev boards; set HAVE_STATUS_LED
+// false if yours has none or the pin is wanted for something else.
+//   slow blink, once a second ... waiting for the controller
+//   solid ....................... controller connected, driving
+//   fast blink .................. controller lost mid-run, drive braked
+constexpr bool    HAVE_STATUS_LED = true;
+constexpr uint8_t PIN_STATUS_LED  = 2;
+
 // ---------- Servos (signal only; power from the 5 V servo regulator, common ground) ----------
 constexpr uint8_t PIN_SERVO_SHOULDER = 19;  // MG996R whose horn carries the 120 mm upper arm
 constexpr uint8_t PIN_SERVO_ELBOW    = 18;  // MG996R driving the 30 mm crank -> push rod -> forearm

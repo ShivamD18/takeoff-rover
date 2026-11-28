@@ -26,6 +26,8 @@ Drive drive;
 Arm arm_;
 Claw claw_;
 ControllerPtr pad = nullptr;
+uint32_t padLostAt = 0;        // millis the controller was last lost
+bool everConnected = false;    // has one ever connected since boot
 
 // ---------- Battery (only with the divider fitted) ----------
 float vbat = 8.0f;
@@ -59,6 +61,7 @@ void onConnected(ControllerPtr c) {
     return;
   }
   pad = c;
+  everConnected = true;
   BP32.enableNewBluetoothConnections(false);   // no other controller can pair mid-match
   c->playDualRumble(0, 250, 0x80, 0x40);
   Serial.printf("Controller connected: %s\n", c->getModelName().c_str());
@@ -67,11 +70,24 @@ void onConnected(ControllerPtr c) {
 void onDisconnected(ControllerPtr c) {
   if (c == pad) {
     pad = nullptr;
+    padLostAt = millis();
     drive.emergencyStop();
     arm_.hold();
     BP32.enableNewBluetoothConnections(true);
     Serial.println("Controller lost: drive braked, arm holding");
   }
+}
+
+// ---------- Status LED ----------
+// Blink rate carries the state. everConnected stays false until a controller has been
+// seen, so a rover that never connected shows "waiting" rather than "lost".
+void updateStatusLed(uint32_t now, bool connected) {
+  if (!HAVE_STATUS_LED) return;
+  bool on;
+  if (connected) on = true;                                  // solid
+  else if (everConnected && now - padLostAt < 10000) on = (now / 120) & 1;   // fast: just lost
+  else on = (now / 500) & 1;                                 // slow: waiting
+  digitalWrite(PIN_STATUS_LED, on ? HIGH : LOW);
 }
 
 // ---------- Input shaping ----------
@@ -116,6 +132,7 @@ void preset(const Pose &p, const char *name) {
 // ---------- Main ----------
 void setup() {
   drive.begin();                                 // bridges off before anything else
+  if (HAVE_STATUS_LED) { pinMode(PIN_STATUS_LED, OUTPUT); digitalWrite(PIN_STATUS_LED, LOW); }
   Serial.begin(115200);
   if (HAVE_VBAT_SENSE) {
     analogReadResolution(12);
@@ -138,6 +155,7 @@ void loop() {
   static uint32_t lastTick = 0, lastBatt = 0, lastLog = 0, lastBuzz = 0;
   uint32_t now = millis();
   if (now - lastBatt >= 100) { lastBatt = now; updateBattery(); }
+  updateStatusLed(now, pad != nullptr && pad->isConnected());
   if (now - lastTick < 20) return;               // 50 Hz control loop
   float dt = (now - lastTick) / 1000.0f;
   lastTick = now;
