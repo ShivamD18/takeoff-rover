@@ -241,6 +241,11 @@ Run the PC check after changing any geometry or preset:
 g++ -std=c++17 -O2 -Wall -ITakeOffRover tools/arm_check.cpp -o /tmp/arm_check && /tmp/arm_check
 ```
 
+The checker builds at C++17, but **the ESP32 Arduino core compiles the firmware as `gnu++11`**, which is
+stricter in ways that matter: a struct carrying default member initialisers is not an aggregate there, so
+`Thing{a, b}` compiles on a PC and fails on the board. Anything that goes in `TakeOffRover/` wants checking at
+`-std=gnu++11` too, or the first sign of trouble is a failed Verify at the bench.
+
 ## Not done yet
 
 - If you change geometry, presets, servo signs or the claw motion profile in `arm_kinematics.h` / `config.h`, make the

@@ -23,7 +23,13 @@ namespace motion {
 // into the target rather than stopping dead, which is what a human feels as smooth.
 // Tracking a target that keeps moving (an analog trigger, a stick) works the same way.
 // The jaws drive it in mm; the arm drives it in degrees along a preset move.
-struct State { float pos = 0.0f, vel = 0.0f; };
+// A plain constructor rather than default member initialisers: the Arduino ESP32 core
+// builds as gnu++11, where a struct carrying member initialisers is not an aggregate and
+// State{pos, vel} will not compile. This form works on both.
+struct State {
+  float pos, vel;
+  State(float p = 0.0f, float v = 0.0f) : pos(p), vel(v) {}
+};
 
 inline bool atRest(const State &m, float target) {
   return fabsf(target - m.pos) < 1e-3f && fabsf(m.vel) < 1e-3f;
