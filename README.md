@@ -9,6 +9,7 @@ assembly exported as `TakeOFF_Rover.stp`, plus one measurement taken on the buil
 | `DriveBenchTest/` | Drive bench test over Serial: per-side drive, direction check, and a creep test that measures `MIN_EFFECTIVE` |
 | `ServoBenchTest/` | Servo bench test and calibration over Serial (`s`/`e`/`c <µs>`, `x`, `t`, `h`) |
 | `tools/arm_check.cpp` | PC test of the arm math: presets, moves between them, pulse ranges |
+| `pages/takeoff-drive-live.html` | Guided wheel check over USB: pin map, each side's direction, and the `MIN_EFFECTIVE` creep test, with the `config.h` lines written out at the end (needs `DriveBenchTest` flashed) |
 | `pages/takeoff-arm-sim.html` | Offline arm simulator, any browser. Same geometry, limits, keep-out and presets as the firmware |
 | `pages/takeoff-arm-live.html` | Same simulator plus a USB link: with `ServoBenchTest` flashed, the virtual arm drives the real servos (Chrome, Edge or Brave) |
 | `cad/TakeOFF_Rover.stp.zip` | Fusion assembly as STEP (zipped; 55 MB unzipped). The arm numbers in the firmware come from this |
@@ -136,8 +137,14 @@ brought up while the arm is still waiting on its calibration. Serial Monitor at 
 | `s` / `x` | Brake / coast |
 | `p` | Print the pin map |
 
+`pages/takeoff-drive-live.html` drives all of this from a browser instead, as a guided check: it reads the pin
+map off the board, runs each side, runs the creep test with a big button to hit the moment a wheel turns, and
+writes out the `config.h` lines at the end. Chrome, Edge or Brave, same as the arm page. Space or Escape is a
+panic stop.
+
 **Wheels off the ground for the first run** — a miswired bridge drives at full duty. Every command restarts a
-3 s deadman, so a typo cannot leave the rover driving off the bench.
+3 s deadman, so a typo cannot leave the rover driving off the bench. The page holds a command alive while a
+control is set, the way holding a stick would, and brakes if the tab is hidden or closed.
 
 Order: `p` and check the pins against the real wiring → `a 0.6` (only the left pair, forwards) → `b 0.6` →
 `d 0.6` and `d -0.6` → `c a` and `c b`, take the larger and add ~0.02. A side that runs backwards sets its

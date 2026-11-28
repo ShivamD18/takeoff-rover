@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TakeOFF Drive Live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600;700&display=swap">
+<style>
+/* Same tokens as takeoff-arm-live.html, so the two pages read as one tool. */
+:root {
+  --bg: #eef1f3; --panel: #f8fafb; --ink: #1b2329; --muted: #5d6b75; --line: #c9d1d7;
+  --accent: #1f5fbf; --accent-soft: #d6e3f6; --ok: #1d7a4c; --warn: #b26a00; --bad: #b3261e;
+  --font-ui: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12171b; --panel: #192026; --ink: #e3e9ed; --muted: #93a2ad; --line: #2c3740;
+    --accent: #6ea2f0; --accent-soft: #1f3150; --ok: #4cc28a; --warn: #e3a240; --bad: #f07067;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12171b; --panel: #192026; --ink: #e3e9ed; --muted: #93a2ad; --line: #2c3740;
+  --accent: #6ea2f0; --accent-soft: #1f3150; --ok: #4cc28a; --warn: #e3a240; --bad: #f07067;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 15px;
+       line-height: 1.45; margin: 0; padding: 20px 16px 48px; }
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; gap: 14px; }
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; }
+h1 { font-size: 20px; margin: 0; letter-spacing: .01em; }
+h2 { font-size: 15px; margin: 0 0 2px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 13px 15px;
+        display: grid; gap: 11px; align-content: start; }
+.main { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (max-width: 860px) { .main { grid-template-columns: minmax(0, 1fr); } }
+button { font: inherit; font-weight: 600; color: var(--ink); background: var(--panel);
+         border: 1px solid var(--line); border-radius: 5px; padding: 8px 12px; cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+button.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.stop { background: var(--bad); border-color: var(--bad); color: #fff; font-size: 17px; padding: 13px; width: 100%; }
+button.go { background: var(--ok); border-color: var(--ok); color: #fff; }
+.row { display: flex; flex-wrap: wrap; gap: 7px; }
+.row > button { flex: 1 1 auto; min-width: 104px; }
+.warn { background: color-mix(in srgb, var(--bad) 11%, transparent); border: 1px solid var(--bad);
+        border-radius: 6px; padding: 9px 12px; font-weight: 600; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.dot.on { background: var(--ok); } .dot.err { background: var(--bad); }
+.step { border: 1px solid var(--line); border-radius: 6px; padding: 11px 13px; display: grid; gap: 9px; }
+.step.now { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.step.done { opacity: .62; }
+.step h3 { margin: 0; font-size: 14px; display: flex; gap: 8px; align-items: center; }
+.step .num { background: var(--accent); color: #fff; width: 21px; height: 21px; border-radius: 50%;
+             display: grid; place-items: center; font-size: 12px; flex: none; }
+.step.done .num { background: var(--ok); }
+.step p { margin: 0; color: var(--muted); font-size: 14px; }
+dl { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px; margin: 0; font-size: 14px; }
+dt { color: var(--muted); } dd { margin: 0; font-family: var(--font-data); text-align: right; }
+pre { font-family: var(--font-data); font-size: 12px; background: var(--bg); border: 1px solid var(--line);
+      border-radius: 5px; padding: 9px; margin: 0; max-height: 190px; overflow: auto; white-space: pre-wrap; }
+.big { font-family: var(--font-data); font-size: 30px; font-weight: 600; text-align: center; padding: 5px; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+.sld { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; font-size: 14px; }
+.sld output { font-family: var(--font-data); }
+code { font-family: var(--font-data); font-size: 13px; }
+.hint { color: var(--muted); font-size: 13px; }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>TakeOFF Drive Live</h1>
+    <div class="row" style="flex:none">
+      <span><span class="dot" id="dot"></span> <span id="state">Not connected</span></span>
+      <button id="conn" class="pri">Connect</button>
+    </div>
+  </header>
+
+  <div class="warn" id="safety">Wheels off the ground. A miswired bridge drives at full duty.
+    Flash <code>DriveBenchTest</code> first, and close the Arduino Serial Monitor.</div>
+
+  <button class="stop" id="stop" disabled>STOP — brake both sides</button>
+
+  <div class="main">
+    <div class="card">
+      <h2>Guided check</h2>
+      <div id="steps"></div>
+      <div class="row"><button id="restart">Start over</button></div>
+    </div>
+
+    <div style="display:grid;gap:14px;align-content:start">
+      <div class="card">
+        <h2>Result</h2>
+        <dl>
+          <dt>Pin map</dt><dd id="rPins">–</dd>
+          <dt>Left side</dt><dd id="rLeft">–</dd>
+          <dt>Right side</dt><dd id="rRight">–</dd>
+          <dt>Creep, left</dt><dd id="rCl">–</dd>
+          <dt>Creep, right</dt><dd id="rCr">–</dd>
+        </dl>
+        <div id="verdict" class="hint">Run the steps and the <code>config.h</code> lines appear here.</div>
+        <pre id="snippet" hidden></pre>
+      </div>
+
+      <div class="card">
+        <h2>Manual</h2>
+        <div class="sld"><label for="sA">Left (bridge A)</label><output id="oA">0.00</output>
+          <input id="sA" type="range" min="-100" max="100" step="5" value="0"></div>
+        <div class="sld"><label for="sB">Right (bridge B)</label><output id="oB">0.00</output>
+          <input id="sB" type="range" min="-100" max="100" step="5" value="0"></div>
+        <div class="row">
+          <button data-cmd="d 0.6">Both fwd</button>
+          <button data-cmd="d -0.6">Both rev</button>
+          <button data-cmd="x">Coast</button>
+          <button data-cmd="p">Pins</button>
+        </div>
+        <dl><dt>Board reports (a / b)</dt><dd id="rTel">–</dd></dl>
+      </div>
+
+      <div class="card">
+        <h2>Serial</h2>
+        <pre id="log">Not connected.</pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const $ = id => document.getElementById(id);
+  const LINK = { port: null, writer: null, connected: false, reading: false };
+  // The sketch brakes after 3 s with no command. Resend what is held so the wheels keep
+  // running while a slider is up, the way holding a stick would.
+  const KEEPALIVE_MS = 1000;
+  let held = null, lastSend = 0, creeping = null;
+
+  const log = (t, cls) => {
+    const el = $("log");
+    if (el.textContent === "Not connected.") el.textContent = "";
+    el.textContent += (cls === "tx" ? "› " : "") + t + "\n";
+    el.scrollTop = el.scrollHeight;
+  };
+
+  async function send(line) {
+    if (!LINK.writer) return;
+    try {
+      await LINK.writer.write(new TextEncoder().encode(line + "\n"));
+      if (line.trim()) log(line, "tx");
+    } catch (e) { log("write failed: " + e.message); }
+  }
+
+  // ---------- connection ----------
+  async function connect() {
+    if (!navigator.serial) {
+      $("state").textContent = "No Web Serial in this browser";
+      $("dot").className = "dot err";
+      log("This browser has no Web Serial. Use Chrome, Edge or Brave, and open this file over http://localhost if it is still missing.");
+      return;
+    }
+    try {
+      LINK.port = await navigator.serial.requestPort();
+      await LINK.port.open({ baudRate: 115200 });
+      LINK.writer = LINK.port.writable.getWriter();
+      LINK.connected = true;
+      $("conn").textContent = "Disconnect";
+      $("state").textContent = "Live";
+      $("dot").className = "dot on";
+      $("stop").disabled = false;
+      log("connected at 115200");
+      readLoop();
+      setTimeout(() => send("p"), 400);
+    } catch (e) { log("connect failed: " + e.message); }
+  }
+
+  async function disconnect() {
+    held = null; creeping = null;
+    try { await send("s"); } catch (e) { /* closing anyway */ }
+    LINK.connected = false;
+    try { LINK.writer && LINK.writer.releaseLock(); } catch (e) {}
+    try { LINK.port && await LINK.port.close(); } catch (e) {}
+    LINK.writer = null; LINK.port = null;
+    $("conn").textContent = "Connect";
+    $("state").textContent = "Not connected";
+    $("dot").className = "dot";
+    $("stop").disabled = true;
+    log("disconnected");
+  }
+
+  async function readLoop() {
+    LINK.reading = true;
+    let buf = "";
+    const dec = new TextDecoder();
+    while (LINK.connected && LINK.port && LINK.port.readable) {
+      const reader = LINK.port.readable.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let i;
+          while ((i = buf.indexOf("\n")) >= 0) { handleLine(buf.slice(0, i).trim()); buf = buf.slice(i + 1); }
+        }
+      } catch (e) { log("read stopped: " + e.message); break; }
+      finally { try { reader.releaseLock(); } catch (e) {} }
+    }
+    LINK.reading = false;
+  }
+
+  // ---------- incoming ----------
+  const R = { pins: null, left: null, right: null, creepL: null, creepR: null };
+
+  function handleLine(line) {
+    if (!line) return;
+    const t = line.match(/^T\s+a\s+(-?[\d.]+)\s+b\s+(-?[\d.]+)/);
+    if (t) { $("rTel").textContent = `${(+t[1]).toFixed(2)} / ${(+t[2]).toFixed(2)}`; return; }
+    log(line);
+    const pin = line.match(/^>\s*(left|right)\s+EN[AB]\s+(\d+)\s+IN\d\s+(\d+)\s+IN\d\s+(\d+)/);
+    if (pin) {
+      R.pins = R.pins || {};
+      R.pins[pin[1]] = `EN ${pin[2]} IN ${pin[3]}/${pin[4]}`;
+      $("rPins").textContent = [R.pins.left && "L " + R.pins.left, R.pins.right && "R " + R.pins.right]
+        .filter(Boolean).join("  ");
+      return;
+    }
+    const duty = line.match(/^duty\s+([\d.]+)/);
+    if (duty && creeping) { $("creepVal").textContent = (+duty[1]).toFixed(2); return; }
+    const got = line.match(/started turning at duty\s+([\d.]+)/);
+    if (got && creeping) { finishCreep(+got[1]); return; }
+    if (/reached full duty without turning/.test(line) && creeping) { finishCreep(null); return; }
+  }
+
+  // ---------- keepalive ----------
+  setInterval(() => {
+    if (!LINK.connected || creeping || !held) return;      // a creep must not be interrupted
+    if (Date.now() - lastSend < KEEPALIVE_MS) return;
+    lastSend = Date.now();
+    send(held);
+  }, 250);
+
+  function drive(cmd) { held = cmd; lastSend = Date.now(); send(cmd); }
+  function halt() { held = null; creeping = null; send("s"); }
+
+  // ---------- guided steps ----------
+  const STEPS = [
+    { id: "pins", title: "Check the pin map",
+      body: "The board prints its pins on connect. Compare them with the actual wiring before anything turns.",
+      actions: [{ label: "Print again", fn: () => send("p") },
+                { label: "Matches the wiring", cls: "go", fn: () => next() },
+                { label: "Does not match", cls: "", fn: () => { note("Pin map does not match the wiring — tell Claude which pins moved."); next(); } }] },
+    { id: "left", title: "Left side, forwards",
+      body: "Runs bridge A at 0.6. Only the LEFT pair should turn, and forwards.",
+      actions: [{ label: "Run left", cls: "pri", fn: () => drive("a 0.6") },
+                { label: "Left, forwards ✓", cls: "go", fn: () => { R.left = "ok"; $("rLeft").textContent = "forwards"; halt(); next(); } },
+                { label: "Left, backwards", fn: () => { R.left = "invert"; $("rLeft").textContent = "backwards → invert"; halt(); next(); } },
+                { label: "Wrong side / nothing", fn: () => { R.left = "bad"; $("rLeft").textContent = "wrong side or nothing"; halt(); next(); } }] },
+    { id: "right", title: "Right side, forwards",
+      body: "Runs bridge B at 0.6. Only the RIGHT pair should turn, and forwards.",
+      actions: [{ label: "Run right", cls: "pri", fn: () => drive("b 0.6") },
+                { label: "Right, forwards ✓", cls: "go", fn: () => { R.right = "ok"; $("rRight").textContent = "forwards"; halt(); next(); } },
+                { label: "Right, backwards", fn: () => { R.right = "invert"; $("rRight").textContent = "backwards → invert"; halt(); next(); } },
+                { label: "Wrong side / nothing", fn: () => { R.right = "bad"; $("rRight").textContent = "wrong side or nothing"; halt(); next(); } }] },
+    { id: "both", title: "Both together",
+      body: "Straight forwards, then straight back. Both sides should match.",
+      actions: [{ label: "Forwards", cls: "pri", fn: () => drive("d 0.6") },
+                { label: "Backwards", cls: "pri", fn: () => drive("d -0.6") },
+                { label: "Both fine", cls: "go", fn: () => { halt(); next(); } }] },
+    { id: "creepL", title: "Creep test, left",
+      body: "Duty climbs from zero. Press the green button the INSTANT the wheel starts turning.",
+      creep: "a" },
+    { id: "creepR", title: "Creep test, right",
+      body: "Same for the right side.",
+      creep: "b" },
+    { id: "done", title: "Done",
+      body: "Send the result panel to Claude and the numbers go into config.h.", actions: [] },
+  ];
+  let at = 0;
+
+  function note(t) { log("! " + t); }
+  function next() { at = Math.min(at + 1, STEPS.length - 1); render(); }
+
+  function startCreep(side) {
+    creeping = side;
+    held = null;
+    $("creepVal").textContent = "0.00";
+    send("c " + side);
+  }
+  function finishCreep(duty) {
+    const side = creeping;
+    creeping = null;
+    if (side === "a") { R.creepL = duty; $("rCl").textContent = duty === null ? "never turned" : duty.toFixed(2); }
+    else { R.creepR = duty; $("rCr").textContent = duty === null ? "never turned" : duty.toFixed(2); }
+    verdict();
+    next();
+  }
+
+  function render() {
+    const host = $("steps");
+    host.textContent = "";
+    STEPS.forEach((s, i) => {
+      const d = document.createElement("div");
+      d.className = "step" + (i === at ? " now" : i < at ? " done" : "");
+      const h = document.createElement("h3");
+      const n = document.createElement("span"); n.className = "num"; n.textContent = i < at ? "✓" : String(i + 1);
+      h.append(n, document.createTextNode(s.title));
+      d.append(h);
+      const p = document.createElement("p"); p.textContent = s.body; d.append(p);
+      if (i === at) {
+        if (s.creep) {
+          const big = document.createElement("div"); big.className = "big"; big.id = "creepVal"; big.textContent = "0.00";
+          const row = document.createElement("div"); row.className = "row";
+          const go = document.createElement("button"); go.className = "pri"; go.textContent = "Start creep";
+          go.onclick = () => startCreep(s.creep);
+          const hit = document.createElement("button"); hit.className = "go"; hit.textContent = "It is turning — stop";
+          hit.onclick = () => { if (creeping) send(""); };
+          const skip = document.createElement("button"); skip.textContent = "Skip";
+          skip.onclick = () => { creeping = null; halt(); next(); };
+          row.append(go, hit, skip);
+          d.append(big, row);
+        } else if (s.actions && s.actions.length) {
+          const row = document.createElement("div"); row.className = "row";
+          s.actions.forEach(a => {
+            const b = document.createElement("button");
+            if (a.cls) b.className = a.cls;
+            b.textContent = a.label;
+            b.onclick = a.fn;
+            row.append(b);
+          });
+          d.append(row);
+        }
+      }
+      host.append(d);
+    });
+  }
+
+  function verdict() {
+    const parts = [];
+    if (R.left === "invert") parts.push("constexpr bool  LEFT_INVERT  = true;");
+    else if (R.left === "ok") parts.push("constexpr bool  LEFT_INVERT  = false;");
+    if (R.right === "invert") parts.push("constexpr bool  RIGHT_INVERT = true;");
+    else if (R.right === "ok") parts.push("constexpr bool  RIGHT_INVERT = false;");
+    const cs = [R.creepL, R.creepR].filter(v => typeof v === "number");
+    if (cs.length) {
+      const m = Math.max(...cs) + 0.02;
+      parts.push(`constexpr float MIN_EFFECTIVE   = ${m.toFixed(2)}f;   // measured, larger side + 0.02`);
+    }
+    if (!parts.length) return;
+    $("verdict").textContent = "Paste into TakeOffRover/config.h:";
+    $("snippet").hidden = false;
+    $("snippet").textContent = parts.join("\n");
+  }
+
+  // ---------- manual ----------
+  for (const [sid, oid, key] of [["sA", "oA", "a"], ["sB", "oB", "b"]]) {
+    $(sid).addEventListener("input", e => {
+      const v = e.target.value / 100;
+      $(oid).textContent = v.toFixed(2);
+      if (Math.abs(v) < 0.005) halt(); else drive(`${key} ${v.toFixed(2)}`);
+    });
+  }
+  document.querySelectorAll("[data-cmd]").forEach(b => b.onclick = () => {
+    const c = b.dataset.cmd;
+    if (c === "x" || c === "p") { held = null; send(c); } else drive(c);
+  });
+
+  $("stop").onclick = () => { $("sA").value = 0; $("sB").value = 0; $("oA").textContent = "0.00"; $("oB").textContent = "0.00"; halt(); };
+  $("conn").onclick = () => (LINK.connected ? disconnect() : connect());
+  $("restart").onclick = () => { at = 0; halt(); render(); };
+  addEventListener("keydown", e => { if (e.key === " " || e.key === "Escape") { e.preventDefault(); $("stop").click(); } });
+  addEventListener("pagehide", () => { if (LINK.connected) send("s"); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden && LINK.connected) halt(); });
+  render();
+})();
+</script>
+</html>
