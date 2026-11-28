@@ -61,6 +61,17 @@ constexpr uint8_t  SERVO_BITS     = 16;     // 20 ms frame, ~0.3 us per step
 // ---------- Drive feel ----------
 constexpr bool  LEFT_INVERT  = false;       // CAL: flip if a side drives backwards
 constexpr bool  RIGHT_INVERT = true;
+// ---------- Stick mapping ----------
+// Measured on the rover 2026-11-28: this controller reports the stick axes swapped, so
+// left/right drove forwards/backwards and up/down steered. The swap applies to both
+// sticks, since the right one feeds the arm the same way.
+// If a direction is backwards rather than on the wrong axis, flip its INVERT instead.
+// The 1 Hz serial log prints throttle and turn after this mapping, so push the stick
+// forward and check throttle goes positive before anything is on the ground.
+constexpr bool STICK_SWAP_XY    = true;
+constexpr bool THROTTLE_INVERT  = false;
+constexpr bool TURN_INVERT      = false;
+
 constexpr float STICK_DEADBAND  = 0.08f;
 constexpr float EXPO            = 0.6f;     // 0 = linear, 1 = cubic
 constexpr float TURN_GAIN       = 0.8f;

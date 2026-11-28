@@ -83,6 +83,26 @@ float stick(int32_t raw) {                       // Bluepad32 sticks: -511..512
   return v < 0 ? -s : s;
 }
 
+// Left stick -> throttle and turn, through the swap and invert flags in config.h.
+// Stick up is a negative axisY, hence the sign on the unswapped path.
+void readSticks(float &throttle, float &turn) {
+  float ax = stick(pad->axisX()), ay = stick(pad->axisY());
+  throttle = STICK_SWAP_XY ? ax : -ay;
+  turn     = STICK_SWAP_XY ? ay : ax;
+  if (THROTTLE_INVERT) throttle = -throttle;
+  if (TURN_INVERT) turn = -turn;
+}
+
+// Right stick -> claw tip reach and height, through the same swap: horizontal stick
+// moves the tip in and out, vertical moves it up and down.
+// UNTESTED. ARM_ENABLED is false until the arm is calibrated, so this mirrors the left
+// stick's mapping and wants checking the first time the arm runs.
+void readArmSticks(float &ax, float &az) {
+  float rx = stick(pad->axisRX()), ry = stick(pad->axisRY());
+  ax = STICK_SWAP_XY ? ry : rx;        // horizontal stick = reach
+  az = STICK_SWAP_XY ? rx : -ry;       // vertical stick = height
+}
+
 struct Edge { bool prev = false; bool rose(bool now) { bool r = now && !prev; prev = now; return r; } };
 Edge eA, eB, eX, eY, eRB, eLeft, eRight;
 
@@ -132,9 +152,12 @@ void loop() {
                     arm_.tipX(), arm_.tipZ(), arm_.t1(), arm_.t2(),
                     arm::shoulderUs(arm_.t1()), arm::elbowUs(arm_.t2()), claw_.us(),
                     claw_.gap(), claw_.gripping() ? 'G' : 'o');
-    else if (pad && pad->isConnected())
-      Serial.printf("drive-only | controller ok | stick %+.2f %+.2f%s\n",
-                    stick(pad->axisY()) * -1.0f, stick(pad->axisX()), pad->l1() ? " | LB precision" : "");
+    else if (pad && pad->isConnected()) {
+      float th, tn;
+      readSticks(th, tn);
+      Serial.printf("drive-only | controller ok | throttle %+.2f turn %+.2f%s\n",
+                    th, tn, pad->l1() ? " | LB precision" : "");
+    }
     else
       Serial.println("drive-only | waiting for the controller - turn it on, hold pair the first time");
   }
@@ -150,8 +173,8 @@ void loop() {
   }
 
   // Drive
-  float throttle = -stick(pad->axisY());         // stick up = negative axisY
-  float turn     =  stick(pad->axisX());
+  float throttle, turn;
+  readSticks(throttle, turn);
   float scale = pad->l1() ? PRECISION_SCALE : 1.0f;
   if (lowBatt) scale *= 0.5f;
   if (critBatt) drive.emergencyStop();
@@ -177,8 +200,10 @@ void loop() {
   // Arm (manual trim) — frozen on critical battery to protect the servo rail
   // LB slows the tip as well as the wheels: lining up on a block wants both.
   float armScale = pad->l1() ? ARM_PRECISION_SCALE : 1.0f;
-  float ax = stick(pad->axisRX()) * armScale;
-  float az = -stick(pad->axisRY()) * armScale;
+  float ax, az;
+  readArmSticks(ax, az);
+  ax *= armScale;
+  az *= armScale;
   if (critBatt) arm_.hold(); else arm_.update(ax, az, dt);
   if (arm_.blocked() && now - lastBuzz > 400) { lastBuzz = now; pad->playDualRumble(0, 60, 0x00, 0x60); }
   claw_.update(dt);
