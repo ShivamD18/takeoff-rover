@@ -190,11 +190,18 @@ inner wheel needs to coast at all.
 `config.h` has a master switch at the top:
 
 ```cpp
-constexpr bool ARM_ENABLED = false;
+constexpr bool ARM_ENABLED  = false;
+constexpr bool CLAW_ENABLED = true;
 ```
 
-**False** means the arm and claw servos are never attached and never pulsed: the rover drives normally on the
-controller and the arm stays limp. That is how to fly the firmware before the arm calibration is done.
+**`ARM_ENABLED` false** means the shoulder and elbow servos are never attached and never pulsed: the rover
+drives normally on the controller and the arm stays limp. That is how to fly the firmware before the arm
+calibration is done.
+
+**`CLAW_ENABLED` is separate**, because the claw is its own servo on its own gripper and uses none of the
+shoulder/elbow geometry. False for the arm and true for the claw gives a rover that drives and grips while the
+shoulder and elbow stay out of it, which is the right state until the arm is calibrated. Claw travel is
+clamped to `claw::MIN_US`..`MAX_US`, the finger stops, so it cannot drive past them either way.
 
 Keep it false until `arm::SHOULDER` and `arm::ELBOW` hold measured numbers. The first servo pulse sends the arm
 straight to STOW at whatever angle the uncalibrated constants point at, which with the arm fitted can drive it
