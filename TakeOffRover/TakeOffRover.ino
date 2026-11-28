@@ -107,12 +107,20 @@ void loop() {
   lastTick = now;
   if (dt > 0.1f) dt = 0.1f;
 
-  if (now - lastLog >= 200 && ARM_ENABLED) {     // 5 Hz status for bring-up
+  // Status for bring-up: 5 Hz with the arm live, 1 Hz without. Drive-only builds still
+  // need a sign of life, or an idle rover looks like a dead one.
+  if (now - lastLog >= (uint32_t)(ARM_ENABLED ? 200 : 1000)) {
     lastLog = now;
-    Serial.printf("tip x %.0f z %.0f mm | t1 %.1f t2 %.1f | us S%u E%u C%u | gap %.1f mm %c\n",
-                  arm_.tipX(), arm_.tipZ(), arm_.t1(), arm_.t2(),
-                  arm::shoulderUs(arm_.t1()), arm::elbowUs(arm_.t2()), claw_.us(),
-                  claw_.gap(), claw_.gripping() ? 'G' : 'o');
+    if (ARM_ENABLED)
+      Serial.printf("tip x %.0f z %.0f mm | t1 %.1f t2 %.1f | us S%u E%u C%u | gap %.1f mm %c\n",
+                    arm_.tipX(), arm_.tipZ(), arm_.t1(), arm_.t2(),
+                    arm::shoulderUs(arm_.t1()), arm::elbowUs(arm_.t2()), claw_.us(),
+                    claw_.gap(), claw_.gripping() ? 'G' : 'o');
+    else if (pad && pad->isConnected())
+      Serial.printf("drive-only | controller ok | stick %+.2f %+.2f%s\n",
+                    stick(pad->axisY()) * -1.0f, stick(pad->axisX()), pad->l1() ? " | LB precision" : "");
+    else
+      Serial.println("drive-only | waiting for the controller - turn it on, hold pair the first time");
   }
 
   if (pad == nullptr || !pad->isConnected()) {   // failsafe
