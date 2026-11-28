@@ -2,6 +2,18 @@
 #pragma once
 #include <stdint.h>
 
+// ---------- Arm master switch ----------
+// FALSE: the arm and claw servos are never attached and never pulsed. The rover drives
+// normally and the arm stays limp, so the firmware can be flown with the controller
+// before the arm is calibrated. Keep it false until the shoulder and elbow calibration in
+// the README is done, because the first servo pulse sends the arm straight to STOW at
+// whatever angle the uncalibrated constants point at, which with the arm attached can
+// drive it into the deck or jam the linkage flat.
+// TRUE: full rover. Flip it only once arm::SHOULDER and arm::ELBOW hold measured numbers.
+// A limp MG996R does not hold the arm up, so support or remove the arm while this is
+// false and the arm is fitted.
+constexpr bool ARM_ENABLED = false;
+
 // ---------- Servos (signal only; power from the 5 V servo regulator, common ground) ----------
 constexpr uint8_t PIN_SERVO_SHOULDER = 19;  // MG996R whose horn carries the 120 mm upper arm
 constexpr uint8_t PIN_SERVO_ELBOW    = 18;  // MG996R driving the 30 mm crank -> push rod -> forearm

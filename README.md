@@ -185,6 +185,22 @@ speed range, so this only ever affects turns. Set `PRESERVE_TURN_RATIO = false` 
 Measuring the real `MIN_EFFECTIVE` with `DriveBenchTest` matters here too: the lower it is, the less often the
 inner wheel needs to coast at all.
 
+## Flashing the rover before the arm is calibrated
+
+`config.h` has a master switch at the top:
+
+```cpp
+constexpr bool ARM_ENABLED = false;
+```
+
+**False** means the arm and claw servos are never attached and never pulsed: the rover drives normally on the
+controller and the arm stays limp. That is how to fly the firmware before the arm calibration is done.
+
+Keep it false until `arm::SHOULDER` and `arm::ELBOW` hold measured numbers. The first servo pulse sends the arm
+straight to STOW at whatever angle the uncalibrated constants point at, which with the arm fitted can drive it
+into the deck or jam the linkage flat. A limp MG996R also will not hold the arm up, so support or remove the
+arm while this is false.
+
 ## Bring-up
 
 1. **Horns off.** Flash `ServoBenchTest`, Serial Monitor 115200 with Newline, type `h`.

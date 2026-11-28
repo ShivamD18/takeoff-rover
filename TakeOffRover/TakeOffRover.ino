@@ -89,8 +89,8 @@ void setup() {
     analogReadResolution(12);
     analogSetPinAttenuation(PIN_VBAT, ADC_11db);
   }
-  arm_.begin();
-  claw_.begin();
+  if (ARM_ENABLED) { arm_.begin(); claw_.begin(); }
+  else Serial.println("ARM DISABLED (config.h ARM_ENABLED=false): drive only, servos stay limp");
   BP32.setup(&onConnected, &onDisconnected);
   BP32.enableVirtualDevice(false);
   Serial.println("TakeOFF Rover ready - turn on the Xbox controller (hold pair button the first time)");
@@ -107,7 +107,7 @@ void loop() {
   lastTick = now;
   if (dt > 0.1f) dt = 0.1f;
 
-  if (now - lastLog >= 200) {                    // 5 Hz status for bring-up
+  if (now - lastLog >= 200 && ARM_ENABLED) {     // 5 Hz status for bring-up
     lastLog = now;
     Serial.printf("tip x %.0f z %.0f mm | t1 %.1f t2 %.1f | us S%u E%u C%u | gap %.1f mm %c\n",
                   arm_.tipX(), arm_.tipZ(), arm_.t1(), arm_.t2(),
@@ -117,9 +117,11 @@ void loop() {
 
   if (pad == nullptr || !pad->isConnected()) {   // failsafe
     drive.emergencyStop();
-    arm_.hold();
-    claw_.trim(0.0f, dt);                        // release the trigger: latches the gap it
-    claw_.update(dt);                            // holds, and lets the squeeze relief run
+    if (ARM_ENABLED) {
+      arm_.hold();
+      claw_.trim(0.0f, dt);                      // release the trigger: latches the gap it
+      claw_.update(dt);                          // holds, and lets the squeeze relief run
+    }
     return;
   }
 
@@ -130,6 +132,8 @@ void loop() {
   if (lowBatt) scale *= 0.5f;
   if (critBatt) drive.emergencyStop();
   else drive.command(throttle, turn, scale, dt);
+
+  if (!ARM_ENABLED) return;                      // drive-only build: nothing below runs
 
   // Presets
   if (eA.rose(pad->a())) preset(POSE_PICK,  "PICK");
