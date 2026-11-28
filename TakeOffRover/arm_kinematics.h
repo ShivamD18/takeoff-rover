@@ -222,11 +222,18 @@ constexpr float OPEN_GAP = gapForUs(MIN_US);
 constexpr float LEGO_GRIP_US  = 2087.0f;  // CAL: pulse that holds a LEGO brick
 constexpr float DUPLO_GRIP_US = 1544.0f;  // CAL: pulse that holds a Duplo brick
 constexpr float RELIEF_US     = 40.0f;    // ease this far off the grip pulse after a long hold
+// How far the jaws open when RB is held: far enough to take the block or let it go, and
+// no further. Opening all the way to MIN_US swings the fingers wide enough to knock
+// neighbouring blocks over on the way down, which is what this avoids.
+constexpr float APPROACH_US   = 200.0f;   // CAL: raise if the block does not fit between the jaws
 
 constexpr float gripUs(Block b) { return b == Block::LEGO ? LEGO_GRIP_US : DUPLO_GRIP_US; }
 inline float gapForGrip(Block b) { return gapForUs(gripUs(b)); }
 // Relief backs the pulse off toward the open end, so it always loosens, never tightens.
 inline float gapForRelief(Block b) { return gapForUs(gripUs(b) + OPEN_SIGN * RELIEF_US); }
+// Open just enough to accept or release the block, measured off the grip pulse so it
+// needs no calibration and follows the grip pulse if that is retuned.
+inline float gapForApproach(Block b) { return gapForUs(gripUs(b) + OPEN_SIGN * APPROACH_US); }
 
 // Rounded, not truncated: a half-microsecond bias here is a 0.015 mm step in the gap,
 // but truncation also makes the pulse change one tick early on the way down and late on

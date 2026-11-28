@@ -193,9 +193,21 @@ public:
     write();
   }
 
-  void open()   { target_ = claw::OPEN_GAP; gripping_ = false; slow_ = false; }
-  void grip()   { target_ = claw::gapForGrip(block_); gripping_ = true; slow_ = false; gripSince_ = millis(); }
-  void toggle() { gripping_ ? open() : grip(); }
+  void open()     { target_ = claw::OPEN_GAP; gripping_ = false; slow_ = false; }
+  void approach() { target_ = claw::gapForApproach(block_); gripping_ = false; slow_ = false; }
+  void grip()     { target_ = claw::gapForGrip(block_); gripping_ = true; slow_ = false; gripSince_ = millis(); }
+  void toggle()   { gripping_ ? open() : grip(); }
+
+  // Hold-to-open: held opens only as far as it takes to accept or release the block,
+  // released closes onto it. Safer than a toggle, which leaves the jaws fully open and
+  // wide enough to knock neighbouring blocks on the way down. The trigger still overrides
+  // it while squeezed, for anything that needs a width this does not give.
+  void hold(bool held) {
+    if (trigger_) return;
+    if (held) { if (gripping_ || !holding_) approach(); }
+    else if (holding_) grip();
+    holding_ = held;
+  }
   void setBlock(claw::Block b) { block_ = b; if (gripping_ && !trigger_) grip(); }
   claw::Block block() const { return block_; }
 
@@ -255,7 +267,7 @@ public:
 
 private:
   float gap_ = claw::OPEN_GAP, target_ = claw::OPEN_GAP, vel_ = 0.0f, trigFilt_ = 0.0f;
-  bool gripping_ = false, trigger_ = false, slow_ = false;
+  bool gripping_ = false, trigger_ = false, slow_ = false, holding_ = false;
   uint32_t gripSince_ = 0;
   uint16_t lastUs_ = 0;
   claw::Block block_ = claw::Block::LEGO;

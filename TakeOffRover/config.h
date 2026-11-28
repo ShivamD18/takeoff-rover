@@ -49,14 +49,21 @@ constexpr float ARM_STICK_TAU = 0.07f;
 // smooth. The expo and the filter above do that.
 constexpr float ARM_RAW_TRACK = 1.5f;
 
-// Raw presets on A / B / Y / X, as (shoulder, elbow) pulses. Jog the arm where you want
-// it, read the pair off the 5 Hz serial log, and paste it in here. 1500/1500 is mid
-// travel on both joints, which is where the servos start.
+// Raw presets, as (shoulder, elbow) pulses.
+//   B = UP     arm raised, carrying
+//   X = DOWN   arm lowered, ready to pick off the floor
+//   Y = DROP   reaching out over a wall
+//   A = STOW   folded for travel
+// These are the values the rover starts with. They do not have to be right: hold LB and
+// press a face button to save the arm's CURRENT position to that preset. The save is kept
+// in flash and survives a power cycle, so presets are set by jogging the arm where you
+// want it and pressing two buttons, with no reflashing and no calibration.
+// The serial log prints each saved pair, if you want them written in here permanently.
 struct RawPose { uint16_t s, e; };
-constexpr RawPose RAW_PICK  = {1500, 1500};   // CAL
-constexpr RawPose RAW_CARRY = {1500, 1500};   // CAL
-constexpr RawPose RAW_DROP  = {1500, 1500};   // CAL
-constexpr RawPose RAW_STOW  = {1500, 1500};   // CAL
+constexpr RawPose RAW_UP    = {1500, 1500};   // B
+constexpr RawPose RAW_DOWN  = {1500, 1500};   // X
+constexpr RawPose RAW_DROP  = {1500, 1500};   // Y
+constexpr RawPose RAW_STOW  = {1500, 1500};   // A
 
 // ---------- Bluetooth pairing ----------
 // TRUE wipes every stored controller pairing at boot. Bluepad32 keeps pairing keys in

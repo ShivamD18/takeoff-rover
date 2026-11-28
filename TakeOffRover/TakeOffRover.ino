@@ -10,16 +10,19 @@
 //   LB (hold) ......... precision mode: 35 % drive speed, 40 % arm tip speed
 //   Right stick ....... ARM_RAW_MODE: up/down = shoulder, left/right = elbow (raw pulses)
 //                       otherwise: move the claw tip, left/right = reach, up/down = height
-//   A / B / Y / X ..... presets: PICK / CARRY / DROP-over-wall / STOW
+//   B / X / Y / A ..... arm presets: UP / DOWN / DROP-over-wall / STOW
+//   LB + preset ....... save where the arm is now into that preset (kept in flash)
 //   RT (analog) ....... squeeze the claw proportionally; let go and it holds the gap
 //                       (works with ARM_ENABLED false: the claw shares no arm geometry)
-//   RB ................ claw grip <-> open (latch, for carrying hands-free)
+//   RB (hold) ......... open the jaws just enough to take or release the block;
+//                       let go and they close onto it
 //   D-pad left/right .. block size LEGO / Duplo (1 short or 1 long rumble)
 //   Short buzz ........ the arm refused a move (limit, deck or bracket in the way)
 //
 // Safety: drive brakes and the arm/claw hold whenever the controller is not connected.
 // The physical kill switch is still the primary emergency stop.
 #include <Bluepad32.h>
+#include <Preferences.h>
 #include "config.h"
 #include "drive.h"
 #include "arm_ctrl.h"
@@ -27,6 +30,37 @@
 Drive drive;
 Arm arm_;
 ArmRaw armRaw_;
+Preferences prefs;
+
+// Raw presets, in button order: A stow, B up, X down, Y drop. Loaded from flash at boot,
+// falling back to the config.h values, and rewritten whenever one is taught.
+RawPose poses[4] = {RAW_STOW, RAW_UP, RAW_DOWN, RAW_DROP};
+const char *POSE_NAME[4] = {"STOW (A)", "UP (B)", "DOWN (X)", "DROP (Y)"};
+
+void loadPoses() {
+  prefs.begin("takeoff", true);                  // read-only
+  for (int i = 0; i < 4; i++) {
+    char ks[8], ke[8];
+    snprintf(ks, sizeof ks, "p%ds", i);
+    snprintf(ke, sizeof ke, "p%de", i);
+    poses[i].s = prefs.getUShort(ks, poses[i].s);
+    poses[i].e = prefs.getUShort(ke, poses[i].e);
+  }
+  prefs.end();
+}
+
+void savePose(int i, uint16_t s, uint16_t e) {
+  poses[i].s = s;
+  poses[i].e = e;
+  prefs.begin("takeoff", false);
+  char ks[8], ke[8];
+  snprintf(ks, sizeof ks, "p%ds", i);
+  snprintf(ke, sizeof ke, "p%de", i);
+  prefs.putUShort(ks, s);
+  prefs.putUShort(ke, e);
+  prefs.end();
+  Serial.printf("Saved %s = {%u, %u}\n", POSE_NAME[i], s, e);
+}
 Claw claw_;
 ControllerPtr pad = nullptr;
 uint32_t padLostAt = 0;        // millis the controller was last lost
@@ -152,6 +186,7 @@ void setup() {
     analogReadResolution(12);
     analogSetPinAttenuation(PIN_VBAT, ADC_11db);
   }
+  if (ARM_RAW_MODE) loadPoses();
   if (ARM_ENABLED) { if (ARM_RAW_MODE) armRaw_.begin(); else arm_.begin(); }
   if (CLAW_ENABLED) claw_.begin();
   if (!ARM_ENABLED)
@@ -228,7 +263,7 @@ void loop() {
   // Claw: RB latches open/grip, then RT overrides proportionally while it is held.
   // Runs whether or not the arm does, since it shares none of the arm's geometry.
   if (CLAW_ENABLED) {
-    if (eRB.rose(pad->r1())) claw_.toggle();
+    claw_.hold(pad->r1());                       // hold RB open, release to grip
     // Bluepad32 reports the analog triggers 0..1023. constrain() is a macro that would
     // call throttle() up to three times, so clamp with fminf/fmaxf instead.
     claw_.trim(fminf(1.0f, fmaxf(0.0f, pad->throttle() / 1023.0f)), dt);
@@ -240,12 +275,21 @@ void loop() {
 
   if (!ARM_ENABLED) return;                      // shoulder and elbow stay out of it
 
-  // Presets
+  // Presets. LB held turns a press into "save where the arm is now" instead of a move,
+  // so presets are set from the controller rather than by editing pulses and reflashing.
   if (ARM_RAW_MODE) {
-    if (eA.rose(pad->a())) armRaw_.goTo(RAW_PICK);
-    if (eB.rose(pad->b())) armRaw_.goTo(RAW_CARRY);
-    if (eY.rose(pad->y())) armRaw_.goTo(RAW_DROP);
-    if (eX.rose(pad->x())) armRaw_.goTo(RAW_STOW);
+    bool pressed[4] = {eA.rose(pad->a()), eB.rose(pad->b()), eX.rose(pad->x()), eY.rose(pad->y())};
+    for (int p = 0; p < 4; p++) {
+      if (!pressed[p]) continue;
+      if (pad->l1()) {
+        if (!armRaw_.live()) { Serial.println("Nothing to save: move the right stick to wake the arm first"); continue; }
+        savePose(p, armRaw_.shoulderUs(), armRaw_.elbowUs());
+        pad->playDualRumble(0, 90, 0x00, 0xB0);
+        pad->playDualRumble(140, 90, 0x00, 0xB0);     // two buzzes = saved
+      } else {
+        armRaw_.goTo(poses[p]);
+      }
+    }
   } else {
     if (eA.rose(pad->a())) preset(POSE_PICK,  "PICK");
     if (eB.rose(pad->b())) preset(POSE_CARRY, "CARRY");
