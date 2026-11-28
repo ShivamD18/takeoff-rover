@@ -136,6 +136,9 @@ brought up while the arm is still waiting on its calibration. Serial Monitor at 
 | `c a` / `c b` | Creep test: ramps that side's duty up from zero until you send any line. **That duty is `MIN_EFFECTIVE`** |
 | `s` / `x` | Brake / coast |
 | `p` | Print the pin map |
+| `v` | Walk every drive pin high for 2 s each, naming it — probe each against GND with a meter |
+| `g <pin> <0\|1>` | Hold one GPIO steady, so a meter reads flat DC instead of a PWM average |
+| `f` | Both bridges hard on at full duty for 10 s, then auto-brake |
 
 `pages/takeoff-drive-live.html` drives all of this from a browser instead, as a guided check: it reads the pin
 map off the board, runs each side, runs the creep test with a big button to hit the moment a wheel turns, and
@@ -145,6 +148,13 @@ panic stop.
 **Wheels off the ground for the first run** — a miswired bridge drives at full duty. Every command restarts a
 3 s deadman, so a typo cannot leave the rover driving off the bench. The page holds a command alive while a
 control is set, the way holding a stick would, and brakes if the tab is hidden or closed.
+
+**When the serial echo looks right but nothing turns**, the fault is downstream of the ESP32, and `v`, `g` and
+`f` are there to prove where. `v` and `g` put steady DC on a pin, which a multimeter reads directly — a running
+motor command is PWM, and a meter only shows its average. A pin that never reads ~3.3 V during `v` is not
+reaching the L298N. If `f` cannot turn the wheels, nothing the ESP32 can do will, and the fault is the motor
+supply, the wiring or the bridge itself. Note the L298N drops roughly 1.5–2.5 V, so 5 V in gives the motors
+only about 3 V, which shows up as a high `MIN_EFFECTIVE`.
 
 Order: `p` and check the pins against the real wiring → `a 0.6` (only the left pair, forwards) → `b 0.6` →
 `d 0.6` and `d -0.6` → `c a` and `c b`, take the larger and add ~0.02. A side that runs backwards sets its
