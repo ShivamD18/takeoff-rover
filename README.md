@@ -6,6 +6,7 @@ assembly exported as `TakeOFF_Rover.stp`, plus one measurement taken on the buil
 | Folder | What it is |
 |---|---|
 | `TakeOffRover/` | Rover firmware: drive, arm IK with deck/bracket keep-out, presets, claw, failsafe |
+| `WheelSpinTest/` | Simplest possible wheel test: flash it and watch. No commands, no PWM — cycles every motor and direction forever |
 | `DriveBenchTest/` | Drive bench test over Serial: per-side drive, direction check, and a creep test that measures `MIN_EFFECTIVE` |
 | `ServoBenchTest/` | Servo bench test and calibration over Serial (`s`/`e`/`c <µs>`, `x`, `t`, `h`) |
 | `tools/arm_check.cpp` | PC test of the arm math: presets, moves between them, pulse ranges |
