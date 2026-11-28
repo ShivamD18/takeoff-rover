@@ -183,6 +183,78 @@ private:
   }
 };
 
+// Claw in raw microseconds: two taught endpoints and a profile between them. Nothing here
+// uses the gap model, the pitch radius or any millimetre figure, so it describes the
+// gripper that is actually on the rover.
+class ClawRaw {
+public:
+  void begin(uint16_t openUs, uint16_t closedUs) {
+    openUs_ = clamp(openUs);
+    closedUs_ = clamp(closedUs);
+    m_ = motion::State((float)openUs_, 0.0f);
+    tgt_ = (float)openUs_;
+    pwm::attach(PIN_SERVO_CLAW, CH_CLAW, SERVO_HZ, SERVO_BITS);
+    write();
+  }
+
+  void openJaws()  { closed_ = false; tgt_ = (float)openUs_; }
+  void closeJaws() { closed_ = true;  tgt_ = (float)closedUs_; closedAt_ = millis(); }
+  void toggle()    { closed_ ? openJaws() : closeJaws(); }
+
+  // Analog trigger, 0..1, straight across the taught span. Overrides the toggle while it
+  // is held; letting go latches wherever the driver stopped.
+  void trim(float trig, float dt) {
+    if (trig > CLAW_TRIGGER_DB) {
+      trigFilt_ += dt / (CLAW_TRIGGER_TAU + dt) * (trig - trigFilt_);
+      float f = fmaxf(0.0f, (fminf(trigFilt_, 1.0f) - CLAW_TRIGGER_DB) / (1.0f - CLAW_TRIGGER_DB));
+      f = (1.0f - CLAW_TRIGGER_EXPO) * f + CLAW_TRIGGER_EXPO * f * f * f;
+      tgt_ = (float)openUs_ + f * (float)((int)closedUs_ - (int)openUs_);
+      trigger_ = true;
+      closed_ = f > 0.5f;
+      closedAt_ = millis();
+    } else if (trigger_) {
+      trigger_ = false;
+      trigFilt_ = 0.0f;
+      tgt_ = m_.pos;
+      closedAt_ = millis();
+    } else {
+      trigFilt_ = 0.0f;
+    }
+  }
+
+  void update(float dt) {
+    // Long hold: ease off the overlap so the servo is not pushing at full stall forever.
+    if (closed_ && !trigger_ && millis() - closedAt_ > CLAW_RELIEF_MS) {
+      float eased = (float)closedUs_ - (closedUs_ > openUs_ ? CLAW_RELIEF_BACKOFF : -CLAW_RELIEF_BACKOFF);
+      if (fabsf(eased - tgt_) > 0.5f) tgt_ = clampf(eased);
+    }
+    motion::step(m_, tgt_, dt, CLAW_US_S, CLAW_ACCEL_US);
+    write();
+  }
+
+  void hold() { write(); }
+  void teachOpen()   { openUs_   = (uint16_t)lroundf(m_.pos); }
+  void teachClosed() { closedUs_ = (uint16_t)lroundf(m_.pos); }
+  uint16_t us() const { return (uint16_t)lroundf(m_.pos); }
+  uint16_t openUs() const { return openUs_; }
+  uint16_t closedUs() const { return closedUs_; }
+  bool closed() const { return closed_; }
+
+private:
+  motion::State m_;
+  float tgt_ = 1500.0f, trigFilt_ = 0.0f;
+  uint16_t openUs_ = CLAW_OPEN_US_DEFAULT, closedUs_ = CLAW_CLOSED_US_DEFAULT, lastUs_ = 0;
+  bool closed_ = false, trigger_ = false;
+  uint32_t closedAt_ = 0;
+
+  static uint16_t clamp(uint16_t u) { return u < CLAW_MIN_US ? CLAW_MIN_US : (u > CLAW_MAX_US ? CLAW_MAX_US : u); }
+  static float clampf(float u) { return fmaxf((float)CLAW_MIN_US, fminf((float)CLAW_MAX_US, u)); }
+  void write() {
+    uint16_t u = (uint16_t)lroundf(clampf(m_.pos));
+    if (u != lastUs_) { pwm::servoUs(PIN_SERVO_CLAW, CH_CLAW, u); lastUs_ = u; }
+  }
+};
+
 class Claw {
 public:
   void begin() {

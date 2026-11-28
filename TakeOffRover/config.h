@@ -160,7 +160,28 @@ constexpr float ARM_TRIM_DECEL_MM_S2    = 1800.0f; // and stops in ~0.07 s (~4 m
 constexpr float ARM_PRESET_DEG_S        = 90.0f;   // fastest joint during a preset move
 constexpr float ARM_PRESET_ACCEL_DEG_S2 = 320.0f;  // ease in/out of a preset move
 
-// ---------- Claw feel ----------
+// ---------- Claw, in microseconds ----------
+// The millimetre model is out of the loop here: these are the two pulses the jaws toggle
+// between, and both are TAUGHT FROM THE CONTROLLER and kept in flash, so they describe
+// this gripper as it is now rather than whatever the CAD said.
+//   LB + D-pad LEFT   save where the jaws are now as OPEN
+//   LB + D-pad RIGHT  save where the jaws are now as CLOSED
+// Set OPEN at the widest point that still keeps the pinion fully engaged with the rack.
+// Past that the gear walks off the rack and the jaws have to be rebuilt, which is why
+// this is a taught limit and not a number anyone guesses.
+// Set CLOSED a little past where the jaws touch the block: that overlap is the grip
+// force, since the servo pushes against the block the whole time it is held.
+constexpr uint16_t CLAW_OPEN_US_DEFAULT   = 1500;
+constexpr uint16_t CLAW_CLOSED_US_DEFAULT = 1900;
+// Hard clamp. Nothing taught or commanded can leave this window, so a mis-taught limit
+// cannot drive the servo into its stops.
+constexpr uint16_t CLAW_MIN_US = 700, CLAW_MAX_US = 2300;
+
+constexpr float CLAW_US_S     = 1100.0f;  // closing speed: a full open-to-closed in ~0.4 s
+constexpr float CLAW_ACCEL_US = 7000.0f;  // still eased at both ends, just briskly
+constexpr float CLAW_RELIEF_BACKOFF = 35.0f;  // ease this far off CLOSED after a long hold
+
+// ---------- Claw feel (legacy millimetre path, used only when ARM_RAW_MODE is false) ----------
 // The jaws run a speed- and acceleration-limited profile, so they ease in and out of
 // every move instead of stepping to full speed in one 20 ms tick. An SG90 moves the gap
 // at roughly 175 mm/s unloaded, so the peak below is the profile's limit, not the

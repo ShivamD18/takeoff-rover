@@ -14,8 +14,8 @@
 //   LB + preset ....... save where the arm is now into that preset (kept in flash)
 //   RT (analog) ....... squeeze the claw proportionally; let go and it holds the gap
 //                       (works with ARM_ENABLED false: the claw shares no arm geometry)
-//   RB (hold) ......... open the jaws just enough to take or release the block;
-//                       let go and they close onto it
+//   RB ................ open <-> close the jaws
+//   LB + D-pad L/R .... save where the jaws are now as OPEN / CLOSED (kept in flash)
 //   D-pad left/right .. block size LEGO / Duplo (1 short or 1 long rumble)
 //   Short buzz ........ the arm refused a move (limit, deck or bracket in the way)
 //
@@ -35,6 +35,7 @@ Preferences prefs;
 // Raw presets, in button order: A stow, B up, X down, Y drop. Loaded from flash at boot,
 // falling back to the config.h values, and rewritten whenever one is taught.
 RawPose poses[4] = {RAW_STOW, RAW_UP, RAW_DOWN, RAW_DROP};
+uint16_t clawOpenUs = CLAW_OPEN_US_DEFAULT, clawClosedUs = CLAW_CLOSED_US_DEFAULT;
 const char *POSE_NAME[4] = {"STOW (A)", "UP (B)", "DOWN (X)", "DROP (Y)"};
 
 void loadPoses() {
@@ -46,7 +47,16 @@ void loadPoses() {
     poses[i].s = prefs.getUShort(ks, poses[i].s);
     poses[i].e = prefs.getUShort(ke, poses[i].e);
   }
+  clawOpenUs   = prefs.getUShort("co", clawOpenUs);
+  clawClosedUs = prefs.getUShort("cc", clawClosedUs);
   prefs.end();
+}
+
+void saveClaw(const char *key, uint16_t us, const char *what) {
+  prefs.begin("takeoff", false);
+  prefs.putUShort(key, us);
+  prefs.end();
+  Serial.printf("Saved claw %s = %u us\n", what, us);
 }
 
 void savePose(int i, uint16_t s, uint16_t e) {
@@ -62,6 +72,7 @@ void savePose(int i, uint16_t s, uint16_t e) {
   Serial.printf("Saved %s = {%u, %u}\n", POSE_NAME[i], s, e);
 }
 Claw claw_;
+ClawRaw clawRaw_;
 ControllerPtr pad = nullptr;
 uint32_t padLostAt = 0;        // millis the controller was last lost
 bool everConnected = false;    // has one ever connected since boot
@@ -188,7 +199,7 @@ void setup() {
   }
   if (ARM_RAW_MODE) loadPoses();
   if (ARM_ENABLED) { if (ARM_RAW_MODE) armRaw_.begin(); else arm_.begin(); }
-  if (CLAW_ENABLED) claw_.begin();
+  if (CLAW_ENABLED) { if (ARM_RAW_MODE) clawRaw_.begin(clawOpenUs, clawClosedUs); else claw_.begin(); }
   if (!ARM_ENABLED)
     Serial.printf("ARM DISABLED (config.h ARM_ENABLED=false): shoulder and elbow stay limp%s\n",
                   CLAW_ENABLED ? ", claw is live on RT/RB" : ", claw disabled too");
@@ -218,10 +229,11 @@ void loop() {
   if (now - lastLog >= (uint32_t)(ARM_ENABLED ? 200 : 1000)) {
     lastLog = now;
     if (ARM_ENABLED && ARM_RAW_MODE)
-      Serial.printf("raw arm | S %u  E %u us%s | claw %u us %c\n",
+      Serial.printf("raw arm | S %u  E %u us%s | claw %u us %c  [open %u / closed %u]\n",
                     armRaw_.shoulderUs(), armRaw_.elbowUs(),
                     armRaw_.live() ? "" : "  (limp - move the right stick to wake it)",
-                    claw_.us(), claw_.gripping() ? 'G' : 'o');
+                    clawRaw_.us(), clawRaw_.closed() ? 'C' : 'o',
+                    clawRaw_.openUs(), clawRaw_.closedUs());
     else if (ARM_ENABLED)
       Serial.printf("tip x %.0f z %.0f mm | t1 %.1f t2 %.1f | us S%u E%u C%u | gap %.1f mm %c\n",
                     arm_.tipX(), arm_.tipZ(), arm_.t1(), arm_.t2(),
@@ -246,8 +258,8 @@ void loop() {
     drive.emergencyStop();
     if (ARM_ENABLED) { if (ARM_RAW_MODE) armRaw_.hold(); else arm_.hold(); }
     if (CLAW_ENABLED) {
-      claw_.trim(0.0f, dt);                      // release the trigger: latches the gap it
-      claw_.update(dt);                          // holds, and lets the squeeze relief run
+      if (ARM_RAW_MODE) { clawRaw_.trim(0.0f, dt); clawRaw_.update(dt); }
+      else { claw_.trim(0.0f, dt); claw_.update(dt); }   // keep holding whatever it has
     }
     return;
   }
@@ -263,14 +275,25 @@ void loop() {
   // Claw: RB latches open/grip, then RT overrides proportionally while it is held.
   // Runs whether or not the arm does, since it shares none of the arm's geometry.
   if (CLAW_ENABLED) {
-    claw_.hold(pad->r1());                       // hold RB open, release to grip
     // Bluepad32 reports the analog triggers 0..1023. constrain() is a macro that would
     // call throttle() up to three times, so clamp with fminf/fmaxf instead.
-    claw_.trim(fminf(1.0f, fmaxf(0.0f, pad->throttle() / 1023.0f)), dt);
+    float trig = fminf(1.0f, fmaxf(0.0f, pad->throttle() / 1023.0f));
     uint8_t dp = pad->dpad();
-    if (eLeft.rose(dp & DPAD_LEFT))   { claw_.setBlock(claw::Block::LEGO);  pad->playDualRumble(0, 120, 0x60, 0x00); }
-    if (eRight.rose(dp & DPAD_RIGHT)) { claw_.setBlock(claw::Block::DUPLO); pad->playDualRumble(0, 400, 0x60, 0x00); }
-    claw_.update(dt);
+    bool dL = eLeft.rose(dp & DPAD_LEFT), dR = eRight.rose(dp & DPAD_RIGHT);
+    if (ARM_RAW_MODE) {
+      if (eRB.rose(pad->r1())) clawRaw_.toggle();          // RB opens and closes
+      clawRaw_.trim(trig, dt);
+      // LB + d-pad teaches the two endpoints where the jaws are right now.
+      if (pad->l1() && dL) { clawRaw_.teachOpen();   clawOpenUs   = clawRaw_.openUs();   saveClaw("co", clawOpenUs,   "OPEN");   pad->playDualRumble(0, 90, 0x00, 0xB0); }
+      if (pad->l1() && dR) { clawRaw_.teachClosed(); clawClosedUs = clawRaw_.closedUs(); saveClaw("cc", clawClosedUs, "CLOSED"); pad->playDualRumble(0, 90, 0x00, 0xB0); }
+      clawRaw_.update(dt);
+    } else {
+      if (eRB.rose(pad->r1())) claw_.toggle();
+      claw_.trim(trig, dt);
+      if (dL) { claw_.setBlock(claw::Block::LEGO);  pad->playDualRumble(0, 120, 0x60, 0x00); }
+      if (dR) { claw_.setBlock(claw::Block::DUPLO); pad->playDualRumble(0, 400, 0x60, 0x00); }
+      claw_.update(dt);
+    }
   }
 
   if (!ARM_ENABLED) return;                      // shoulder and elbow stay out of it
