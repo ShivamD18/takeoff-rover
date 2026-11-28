@@ -14,6 +14,11 @@
 // false and the arm is fitted.
 constexpr bool ARM_ENABLED = false;
 
+// The claw is a separate servo on its own gripper and does not use the shoulder/elbow
+// geometry at all, so it can run while the arm is still disabled. Its travel is clamped
+// to claw::MIN_US..MAX_US, which are the finger stops, so it cannot drive past them.
+constexpr bool CLAW_ENABLED = true;
+
 // ---------- Bluetooth pairing ----------
 // TRUE wipes every stored controller pairing at boot. Bluepad32 keeps pairing keys in
 // flash, and a stale set makes a controller connect and drop straight back out, which

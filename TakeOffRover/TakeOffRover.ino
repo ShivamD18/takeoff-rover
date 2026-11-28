@@ -11,6 +11,7 @@
 //   Right stick ....... move the claw tip: left/right = reach in/out, up/down = height
 //   A / B / Y / X ..... presets: PICK / CARRY / DROP-over-wall / STOW
 //   RT (analog) ....... squeeze the claw proportionally; let go and it holds the gap
+//                       (works with ARM_ENABLED false: the claw shares no arm geometry)
 //   RB ................ claw grip <-> open (latch, for carrying hands-free)
 //   D-pad left/right .. block size LEGO / Duplo (1 short or 1 long rumble)
 //   Short buzz ........ the arm refused a move (limit, deck or bracket in the way)
@@ -138,8 +139,11 @@ void setup() {
     analogReadResolution(12);
     analogSetPinAttenuation(PIN_VBAT, ADC_11db);
   }
-  if (ARM_ENABLED) { arm_.begin(); claw_.begin(); }
-  else Serial.println("ARM DISABLED (config.h ARM_ENABLED=false): drive only, servos stay limp");
+  if (ARM_ENABLED) arm_.begin();
+  if (CLAW_ENABLED) claw_.begin();
+  if (!ARM_ENABLED)
+    Serial.printf("ARM DISABLED (config.h ARM_ENABLED=false): shoulder and elbow stay limp%s\n",
+                  CLAW_ENABLED ? ", claw is live on RT/RB" : ", claw disabled too");
   BP32.setup(&onConnected, &onDisconnected);
   BP32.enableVirtualDevice(false);
   if (FORGET_BT_KEYS) {
@@ -173,8 +177,13 @@ void loop() {
     else if (pad && pad->isConnected()) {
       float th, tn;
       readSticks(th, tn);
-      Serial.printf("drive-only | controller ok | throttle %+.2f turn %+.2f%s\n",
-                    th, tn, pad->l1() ? " | LB precision" : "");
+      if (CLAW_ENABLED)
+        Serial.printf("drive+claw | throttle %+.2f turn %+.2f | claw %u us gap %.1f mm %c%s\n",
+                      th, tn, claw_.us(), claw_.gap(), claw_.gripping() ? 'G' : 'o',
+                      pad->l1() ? " | LB precision" : "");
+      else
+        Serial.printf("drive-only | controller ok | throttle %+.2f turn %+.2f%s\n",
+                      th, tn, pad->l1() ? " | LB precision" : "");
     }
     else
       Serial.println("drive-only | waiting for the controller - turn it on, hold pair the first time");
@@ -182,8 +191,8 @@ void loop() {
 
   if (pad == nullptr || !pad->isConnected()) {   // failsafe
     drive.emergencyStop();
-    if (ARM_ENABLED) {
-      arm_.hold();
+    if (ARM_ENABLED) arm_.hold();
+    if (CLAW_ENABLED) {
       claw_.trim(0.0f, dt);                      // release the trigger: latches the gap it
       claw_.update(dt);                          // holds, and lets the squeeze relief run
     }
@@ -198,22 +207,26 @@ void loop() {
   if (critBatt) drive.emergencyStop();
   else drive.command(throttle, turn, scale, dt);
 
-  if (!ARM_ENABLED) return;                      // drive-only build: nothing below runs
+  // Claw: RB latches open/grip, then RT overrides proportionally while it is held.
+  // Runs whether or not the arm does, since it shares none of the arm's geometry.
+  if (CLAW_ENABLED) {
+    if (eRB.rose(pad->r1())) claw_.toggle();
+    // Bluepad32 reports the analog triggers 0..1023. constrain() is a macro that would
+    // call throttle() up to three times, so clamp with fminf/fmaxf instead.
+    claw_.trim(fminf(1.0f, fmaxf(0.0f, pad->throttle() / 1023.0f)), dt);
+    uint8_t dp = pad->dpad();
+    if (eLeft.rose(dp & DPAD_LEFT))   { claw_.setBlock(claw::Block::LEGO);  pad->playDualRumble(0, 120, 0x60, 0x00); }
+    if (eRight.rose(dp & DPAD_RIGHT)) { claw_.setBlock(claw::Block::DUPLO); pad->playDualRumble(0, 400, 0x60, 0x00); }
+    claw_.update(dt);
+  }
+
+  if (!ARM_ENABLED) return;                      // shoulder and elbow stay out of it
 
   // Presets
   if (eA.rose(pad->a())) preset(POSE_PICK,  "PICK");
   if (eB.rose(pad->b())) preset(POSE_CARRY, "CARRY");
   if (eY.rose(pad->y())) preset(POSE_DROP,  "DROP");
   if (eX.rose(pad->x())) preset(POSE_STOW,  "STOW");
-
-  // Claw: RB latches open/grip, then RT overrides proportionally while it is held.
-  if (eRB.rose(pad->r1())) claw_.toggle();
-  // Bluepad32 reports the analog triggers 0..1023. constrain() is a macro that would
-  // call throttle() up to three times, so clamp with fminf/fmaxf instead.
-  claw_.trim(fminf(1.0f, fmaxf(0.0f, pad->throttle() / 1023.0f)), dt);
-  uint8_t dp = pad->dpad();
-  if (eLeft.rose(dp & DPAD_LEFT))   { claw_.setBlock(claw::Block::LEGO);  pad->playDualRumble(0, 120, 0x60, 0x00); }
-  if (eRight.rose(dp & DPAD_RIGHT)) { claw_.setBlock(claw::Block::DUPLO); pad->playDualRumble(0, 400, 0x60, 0x00); }
 
   // Arm (manual trim) — frozen on critical battery to protect the servo rail
   // LB slows the tip as well as the wheels: lining up on a block wants both.
@@ -224,5 +237,4 @@ void loop() {
   az *= armScale;
   if (critBatt) arm_.hold(); else arm_.update(ax, az, dt);
   if (arm_.blocked() && now - lastBuzz > 400) { lastBuzz = now; pad->playDualRumble(0, 60, 0x00, 0x60); }
-  claw_.update(dt);
 }
