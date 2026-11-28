@@ -190,7 +190,30 @@ inner wheel needs to coast at all.
 `config.h` has a master switch at the top:
 
 ```cpp
-constexpr bool ARM_ENABLED  = false;
+constexpr bool ARM_ENABLED  = true;    // shoulder and elbow live
+constexpr bool CLAW_ENABLED = true;    // claw live
+constexpr bool ARM_RAW_MODE = true;    // raw joint control, no calibration needed
+```
+
+**`ARM_RAW_MODE` is the one that matters before calibration.** True means the right stick moves the two servo
+pulses directly: up/down is the shoulder, left/right the elbow. There is no kinematics, no tip position and no
+deck keep-out, so it assumes nothing about where a pulse puts a joint — which is why it works on an
+uncalibrated arm, and why a mechanically offset arm or a joint that cannot reach straight up is not a problem.
+The trade is that nothing stops the arm reaching the deck: the driver's eyes are the limit.
+
+The servos stay **limp until the right stick is moved**, so connecting the battery never moves the arm. The
+first stick input wakes them at **1500 µs on both joints**, mid travel, which can be a long way from where the
+arm physically sits — hold the arm the first time.
+
+A / B / Y / X move to `RAW_PICK` / `RAW_CARRY` / `RAW_DROP` / `RAW_STOW`, which are plain pulse pairs in
+`config.h`. Jog the arm where you want it, read the pair off the 5 Hz serial log, paste it in. That gives
+working presets with no calibration at all.
+
+Set `ARM_RAW_MODE = false` once `arm::SHOULDER` and `arm::ELBOW` hold measured numbers, and the full IK build
+with tip positions and the keep-out takes over.
+
+```cpp
+constexpr bool ARM_ENABLED  = false;   // the pre-calibration state, for reference
 constexpr bool CLAW_ENABLED = true;
 ```
 

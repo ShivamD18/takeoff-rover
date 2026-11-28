@@ -116,6 +116,69 @@ private:
   }
 };
 
+// Raw joint control, for before the arm is calibrated. The sticks move the servo pulses
+// themselves, so nothing here depends on us0, usPerDeg, the link lengths or the keep-out.
+// Both joints run the same profile the rest of the rover uses, in microseconds instead of
+// degrees, so jogging and presets are as smooth as everything else.
+class ArmRaw {
+public:
+  // Deliberately does not attach. The servos stay limp until the driver asks for motion,
+  // so plugging the battery in never moves the arm.
+  void begin() {}
+
+  // ds, de in [-1, 1] from the right stick.
+  void jog(float ds, float de, float dt) {
+    if (!live_) {
+      if (ds == 0.0f && de == 0.0f) return;
+      attach();
+      return;                       // first input only wakes it; it does not also move
+    }
+    tgtS_ = clamp(tgtS_ + ds * ARM_RAW_US_S * dt);
+    tgtE_ = clamp(tgtE_ + de * ARM_RAW_US_S * dt);
+  }
+
+  void goTo(const RawPose &p) {
+    if (!live_) attach();
+    tgtS_ = clamp((float)p.s);
+    tgtE_ = clamp((float)p.e);
+  }
+
+  void update(float dt) {
+    if (!live_) return;
+    motion::step(ms_, tgtS_, dt, ARM_RAW_US_S, ARM_RAW_ACCEL);
+    motion::step(me_, tgtE_, dt, ARM_RAW_US_S, ARM_RAW_ACCEL);
+    write();
+  }
+
+  void hold() { if (live_) write(); }          // keep the pulses alive, stop moving
+  bool live() const { return live_; }
+  uint16_t shoulderUs() const { return (uint16_t)lroundf(ms_.pos); }
+  uint16_t elbowUs() const { return (uint16_t)lroundf(me_.pos); }
+
+private:
+  motion::State ms_, me_;
+  float tgtS_ = 1500.0f, tgtE_ = 1500.0f;
+  bool live_ = false;
+
+  // Waking the servos sends them to mid travel from wherever the arm physically sits, so
+  // it can move a long way on that first command. That is unavoidable without feedback:
+  // hold the arm the first time.
+  void attach() {
+    live_ = true;
+    ms_ = motion::State(1500.0f, 0.0f);
+    me_ = motion::State(1500.0f, 0.0f);
+    tgtS_ = tgtE_ = 1500.0f;
+    pwm::attach(PIN_SERVO_SHOULDER, CH_SHOULDER, SERVO_HZ, SERVO_BITS);
+    pwm::attach(PIN_SERVO_ELBOW,    CH_ELBOW,    SERVO_HZ, SERVO_BITS);
+    write();
+  }
+  static float clamp(float us) { return fmaxf(arm::SHOULDER.minUs, fminf(arm::SHOULDER.maxUs, us)); }
+  void write() {
+    pwm::servoUs(PIN_SERVO_SHOULDER, CH_SHOULDER, shoulderUs());
+    pwm::servoUs(PIN_SERVO_ELBOW,    CH_ELBOW,    elbowUs());
+  }
+};
+
 class Claw {
 public:
   void begin() {

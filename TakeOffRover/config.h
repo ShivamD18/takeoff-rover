@@ -12,12 +12,35 @@
 // TRUE: full rover. Flip it only once arm::SHOULDER and arm::ELBOW hold measured numbers.
 // A limp MG996R does not hold the arm up, so support or remove the arm while this is
 // false and the arm is fitted.
-constexpr bool ARM_ENABLED = false;
+constexpr bool ARM_ENABLED = true;
 
 // The claw is a separate servo on its own gripper and does not use the shoulder/elbow
 // geometry at all, so it can run while the arm is still disabled. Its travel is clamped
 // to claw::MIN_US..MAX_US, which are the finger stops, so it cannot drive past them.
 constexpr bool CLAW_ENABLED = true;
+
+// ---------- Arm mode ----------
+// TRUE: raw joint control. The right stick moves the two servo pulses directly, with no
+// kinematics, no presets by position and no deck keep-out. It assumes nothing about where
+// a pulse puts a joint, which is exactly why it works before the arm is calibrated and
+// why a mechanically offset arm or a joint that cannot reach straight up does not matter.
+// The cost: nothing stops the arm reaching the deck, so the driver's eyes are the limit.
+// FALSE: the full IK build with Pick/Carry/Drop/Stow and the keep-out. Needs arm::SHOULDER
+// and arm::ELBOW to hold measured numbers first, or the arm goes somewhere arbitrary.
+constexpr bool ARM_RAW_MODE = true;
+
+// Jog feel, and how far a preset may travel per second, in microseconds.
+constexpr float ARM_RAW_US_S  = 320.0f;
+constexpr float ARM_RAW_ACCEL = 1400.0f;
+
+// Raw presets on A / B / Y / X, as (shoulder, elbow) pulses. Jog the arm where you want
+// it, read the pair off the 5 Hz serial log, and paste it in here. 1500/1500 is mid
+// travel on both joints, which is where the servos start.
+struct RawPose { uint16_t s, e; };
+constexpr RawPose RAW_PICK  = {1500, 1500};   // CAL
+constexpr RawPose RAW_CARRY = {1500, 1500};   // CAL
+constexpr RawPose RAW_DROP  = {1500, 1500};   // CAL
+constexpr RawPose RAW_STOW  = {1500, 1500};   // CAL
 
 // ---------- Bluetooth pairing ----------
 // TRUE wipes every stored controller pairing at boot. Bluepad32 keeps pairing keys in

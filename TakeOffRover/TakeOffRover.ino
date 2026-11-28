@@ -8,7 +8,8 @@
 // Controls (Xbox layout):
 //   Left stick ........ drive (up/down = throttle, left/right = turn)
 //   LB (hold) ......... precision mode: 35 % drive speed, 40 % arm tip speed
-//   Right stick ....... move the claw tip: left/right = reach in/out, up/down = height
+//   Right stick ....... ARM_RAW_MODE: up/down = shoulder, left/right = elbow (raw pulses)
+//                       otherwise: move the claw tip, left/right = reach, up/down = height
 //   A / B / Y / X ..... presets: PICK / CARRY / DROP-over-wall / STOW
 //   RT (analog) ....... squeeze the claw proportionally; let go and it holds the gap
 //                       (works with ARM_ENABLED false: the claw shares no arm geometry)
@@ -25,6 +26,7 @@
 
 Drive drive;
 Arm arm_;
+ArmRaw armRaw_;
 Claw claw_;
 ControllerPtr pad = nullptr;
 uint32_t padLostAt = 0;        // millis the controller was last lost
@@ -139,7 +141,7 @@ void setup() {
     analogReadResolution(12);
     analogSetPinAttenuation(PIN_VBAT, ADC_11db);
   }
-  if (ARM_ENABLED) arm_.begin();
+  if (ARM_ENABLED) { if (ARM_RAW_MODE) armRaw_.begin(); else arm_.begin(); }
   if (CLAW_ENABLED) claw_.begin();
   if (!ARM_ENABLED)
     Serial.printf("ARM DISABLED (config.h ARM_ENABLED=false): shoulder and elbow stay limp%s\n",
@@ -169,7 +171,12 @@ void loop() {
   // need a sign of life, or an idle rover looks like a dead one.
   if (now - lastLog >= (uint32_t)(ARM_ENABLED ? 200 : 1000)) {
     lastLog = now;
-    if (ARM_ENABLED)
+    if (ARM_ENABLED && ARM_RAW_MODE)
+      Serial.printf("raw arm | S %u  E %u us%s | claw %u us %c\n",
+                    armRaw_.shoulderUs(), armRaw_.elbowUs(),
+                    armRaw_.live() ? "" : "  (limp - move the right stick to wake it)",
+                    claw_.us(), claw_.gripping() ? 'G' : 'o');
+    else if (ARM_ENABLED)
       Serial.printf("tip x %.0f z %.0f mm | t1 %.1f t2 %.1f | us S%u E%u C%u | gap %.1f mm %c\n",
                     arm_.tipX(), arm_.tipZ(), arm_.t1(), arm_.t2(),
                     arm::shoulderUs(arm_.t1()), arm::elbowUs(arm_.t2()), claw_.us(),
@@ -191,7 +198,7 @@ void loop() {
 
   if (pad == nullptr || !pad->isConnected()) {   // failsafe
     drive.emergencyStop();
-    if (ARM_ENABLED) arm_.hold();
+    if (ARM_ENABLED) { if (ARM_RAW_MODE) armRaw_.hold(); else arm_.hold(); }
     if (CLAW_ENABLED) {
       claw_.trim(0.0f, dt);                      // release the trigger: latches the gap it
       claw_.update(dt);                          // holds, and lets the squeeze relief run
@@ -223,10 +230,17 @@ void loop() {
   if (!ARM_ENABLED) return;                      // shoulder and elbow stay out of it
 
   // Presets
-  if (eA.rose(pad->a())) preset(POSE_PICK,  "PICK");
-  if (eB.rose(pad->b())) preset(POSE_CARRY, "CARRY");
-  if (eY.rose(pad->y())) preset(POSE_DROP,  "DROP");
-  if (eX.rose(pad->x())) preset(POSE_STOW,  "STOW");
+  if (ARM_RAW_MODE) {
+    if (eA.rose(pad->a())) armRaw_.goTo(RAW_PICK);
+    if (eB.rose(pad->b())) armRaw_.goTo(RAW_CARRY);
+    if (eY.rose(pad->y())) armRaw_.goTo(RAW_DROP);
+    if (eX.rose(pad->x())) armRaw_.goTo(RAW_STOW);
+  } else {
+    if (eA.rose(pad->a())) preset(POSE_PICK,  "PICK");
+    if (eB.rose(pad->b())) preset(POSE_CARRY, "CARRY");
+    if (eY.rose(pad->y())) preset(POSE_DROP,  "DROP");
+    if (eX.rose(pad->x())) preset(POSE_STOW,  "STOW");
+  }
 
   // Arm (manual trim) — frozen on critical battery to protect the servo rail
   // LB slows the tip as well as the wheels: lining up on a block wants both.
@@ -235,6 +249,11 @@ void loop() {
   readArmSticks(ax, az);
   ax *= armScale;
   az *= armScale;
-  if (critBatt) arm_.hold(); else arm_.update(ax, az, dt);
-  if (arm_.blocked() && now - lastBuzz > 400) { lastBuzz = now; pad->playDualRumble(0, 60, 0x00, 0x60); }
+  if (ARM_RAW_MODE) {
+    if (critBatt) armRaw_.hold();
+    else { armRaw_.jog(az, ax, dt); armRaw_.update(dt); }   // stick up/down = shoulder
+  } else {
+    if (critBatt) arm_.hold(); else arm_.update(ax, az, dt);
+    if (arm_.blocked() && now - lastBuzz > 400) { lastBuzz = now; pad->playDualRumble(0, 60, 0x00, 0x60); }
+  }
 }
